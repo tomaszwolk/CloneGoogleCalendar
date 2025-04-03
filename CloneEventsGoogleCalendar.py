@@ -161,7 +161,7 @@ def validate_post_request() -> str:
         resource_state = request.headers.get('X-Goog-Resource-State')
         return resource_state
     else:
-        return "405"
+        return 405
 
 
 def time_now_minus_ten_seconds() -> str:
@@ -477,6 +477,26 @@ def create_new_event(calendar_id: str, event_data: EventData, service) -> None:
         print(f"Error creating event: {e}")
 
 
+def updated_after_target_calendar(event: dict, event_id: str, target_service) -> bool:
+    """
+    Check if event was already updated.
+    Because several webhooks are being received it won't unnecessary call functions.
+    """
+    # Timestamp of variable 'updated' in primary calendar
+    event_updated = parse(event.get('updated'))
+    # Timestamp of variable 'updated' in target calendar
+    target_event = target_service.events().get(
+        calendarId=TARGET_CALENDAR_ID, eventId=event_id).execute()
+    target_event_updated = parse(target_event.get('updated'))
+
+    time_between_updates = event_updated - target_event_updated
+    if time_between_updates > datetime.timedelta(seconds=0):
+        return True
+    else:
+        print("Event already updated")
+        return False
+
+
 def update_event(target_service, event_data: EventData, target_event: dict) -> None:
     """
     Updates event in target calendar.
@@ -525,7 +545,10 @@ def notifications():
                                                       updatedMin=now_minus_ten_seconds_iso,
                                                       singleEvents=True, maxResults=250, pageToken=page_token).execute()
                 events = events_result.get('items', [])
-                recurrence = check_recurrence(events_result['items'][0])
+                try:
+                    recurrence = check_recurrence(events_result['items'][0])
+                except IndexError:
+                    break
                 if events:
                     for event in events:
                         event_type = event.get('eventType')
@@ -560,11 +583,13 @@ def notifications():
                             update_event(target_service,
                                          event_data, target_event)
                             break
-                        else:
+                        elif updated_after_target_calendar(event=event, event_id=event_id, target_service=target_service) == True:
                             get_event_details(
                                 event, event_data, target_event, change_id=False)
                             update_event(target_service,
                                          event_data, target_event)
+                            continue
+                        else:
                             continue
                 page_token = events_result.get('nextPageToken')
                 if not page_token:

@@ -2,6 +2,7 @@ test.py
 BTM*
 MTB*
 do_testow/
+*.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
