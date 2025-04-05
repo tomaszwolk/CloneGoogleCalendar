@@ -248,22 +248,28 @@ def check_if_id_exists_in_target_calendar(event_id: str, target_service) -> dict
         target_service: The Google Calendar API service instance used to interact with the calendar.
 
     Returns:
-        str: The modified or original ID.
+        dict:   {
+                EventBody: None if event doesn't exist in target calendar else event body,
+                ToDo: "Create new event" if event doesn't exist in target calendar else "Update" or "Update to recurrence",
+                target_sequence: None if event doesn't exist in target calendar else sequence of the event in target calendar.
+                }.
     """
     try:
         target_event = target_service.events().get(calendarId=TARGET_CALENDAR_ID,
                                                    eventId=event_id).execute()
-        print(f"Event {event_id} exists in target calendar.")
-        return {"EventBody": target_event, "ToDo": "Update"}
+        # print(f"Event {event_id} exists in target calendar.")
+        target_sequence = target_event.get('sequence')
+        return {"EventBody": target_event, "ToDo": "Update", "target_sequence": target_sequence}
     except HttpError as error:
         try:
             event_id = get_id(event_id)
             target_event = target_service.events().get(calendarId=TARGET_CALENDAR_ID,
                                                        eventId=event_id).execute()
-            print(f"Event {event_id} exists in target calendar.")
-            return {"EventBody": target_event, "ToDo": "Update to recurrence"}
+            # print(f"Event {event_id} exists in target calendar.")
+            target_sequence = target_event.get('sequence')
+            return {"EventBody": target_event, "ToDo": "Update to recurrence", "target_sequence": target_sequence}
         except HttpError as error:
-            return {"EventBody": None, "ToDo": "Create new event"}
+            return {"EventBody": None, "ToDo": "Create new event", "target_sequence": None}
 
 
 def pop_unnecessary_keys(event_data: EventData) -> None:
@@ -279,7 +285,7 @@ def pop_unnecessary_keys(event_data: EventData) -> None:
     Args:
         event_data (EventData): An instance of the EventData class containing event details.
     """
-    data_to_pop = ("recurringEventId", "kind", "etag", "created", "updated",
+    data_to_pop = ("recurringEventId", "kind", "created", "updated", "etag",
                    "originalStartTime", "htmlLink", "creator", "organizer", "iCalUID", "sequence")
     try:
         event_data.data = {
@@ -342,7 +348,6 @@ def get_event_details(event: dict, event_data: dict, target_event: dict, change_
                 first_key = next(iter(PREFIXES))
                 summary = first_key + " " + summary
                 color_id = PREFIXES[first_key]
-                print("0")
             elif summary[:summary_prefix_len] == target_event_summary[:summary_prefix_len] == list(PREFIXES)[1]:
                 summary = summary
                 color_id = "0"
@@ -493,7 +498,7 @@ def updated_after_target_calendar(event: dict, event_id: str, target_service) ->
     if time_between_updates > datetime.timedelta(seconds=0):
         return True
     else:
-        print("Event already updated")
+        # print("Event already updated")
         return False
 
 
@@ -555,42 +560,51 @@ def notifications():
                         if event_type == 'workingLocation' or event_type == 'birthday':
                             print("Event type: working location or birthday. Skip.")
                             continue
-                        status = event.get('status')
-                        response_status = get_event_response_status(event)
+                        sequence = event.get('sequence')
                         event_id = event.get('id')
-                        if status == 'cancelled' or response_status == 'declined':
-                            print(
-                                f"Status: {status}. Response status: {response_status}")
-                            delete_event(TARGET_CALENDAR_ID,
-                                         event_id, target_service)
-                            continue
-                        event_data = EventData()
                         target_event_dict = check_if_id_exists_in_target_calendar(
                             event_id, target_service)
+                        target_event_sequence = target_event_dict["target_sequence"]
+                        # if sequence is the same it means that event has not been changed
+                        if sequence == target_event_sequence:
+                            continue
                         target_event = target_event_dict["EventBody"]
-                        if target_event == None:
+                        # if target_event_data == 404 then target_event = None and don't get target_event_dict
+                        event_data = EventData()
+                        status = event.get('status')
+                        response_status = get_event_response_status(event)
+                        if target_event == None and status != 'cancelled' and response_status != 'declined':
                             get_event_details(
                                 event, event_data, target_event, change_id=True)
                             if recurrence:
                                 recurrence_data(events, event_data)
                             create_new_event(TARGET_CALENDAR_ID,
                                              event_data, target_service)
+                            if recurrence:
+                                break
                             continue
-                        elif target_event_dict["ToDo"] == "Update to recurrence":
+                        if status == 'cancelled' or response_status == 'declined':
+                            print(
+                                f"Status: {status}. Response status: {response_status}")
+                            delete_event(TARGET_CALENDAR_ID,
+                                         event_id, target_service)
+                            continue
+                        if target_event_dict["ToDo"] == "Update to recurrence":
                             get_event_details(event, event_data,
                                               target_event, change_id=True)
                             recurrence_data(events, event_data)
                             update_event(target_service,
                                          event_data, target_event)
                             break
-                        elif updated_after_target_calendar(event=event, event_id=event_id, target_service=target_service) == True:
+                        # elif updated_after_target_calendar(event=event, event_id=event_id, target_service=target_service) == True:
+                        else:
                             get_event_details(
                                 event, event_data, target_event, change_id=False)
                             update_event(target_service,
                                          event_data, target_event)
                             continue
-                        else:
-                            continue
+                        # else:
+                        #     continue
                 page_token = events_result.get('nextPageToken')
                 if not page_token:
                     break
