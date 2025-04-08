@@ -104,8 +104,6 @@ if not TARGET_CREDENTIALS or not TARGET_CREDENTIALS.valid:
         token.write(TARGET_CREDENTIALS.to_json())
 
 AUTH_TOKEN = CREDENTIALS.token
-deleted_event_list_id = []
-event_list_id = []
 
 
 class EventData:
@@ -175,15 +173,6 @@ def time_now_minus_ten_seconds() -> str:
     return now_minus_ten_seconds_iso
 
 
-def check_recurrence(event: dict) -> bool:
-    """
-    Check if the event is recurring by checking if the 'recurringEventId' key is present in the event object."""
-    if event.get('recurringEventId') != None:
-        return True
-    else:
-        return False
-
-
 def get_event_response_status(event: dict) -> str:
     """
     Get invitation response status if there are attendees.
@@ -226,11 +215,8 @@ def delete_event(calendar_id: str, event_id: str, target_service) -> None:
         event_id (str): The ID of the event to delete.
         target_service (Resource): The Google Calendar API service instance used to interact with the calendar.
     """
-    if event_id in deleted_event_list_id:
-        return
     try:
         target_service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
-        deleted_event_list_id.append(event_id)
         print(f"Event ID: {event_id} deleted")
         return
     except Exception as e:
@@ -238,7 +224,7 @@ def delete_event(calendar_id: str, event_id: str, target_service) -> None:
         return None
 
 
-def check_if_id_exists_in_target_calendar(event_id: str, target_service) -> dict:
+def check_if_id_exists_in_target_calendar(event_id: str, target_service):
     """
     Extracts the portion of the ID before the first underscore, if present.
     If no underscore is found, returns the original ID.
@@ -248,28 +234,14 @@ def check_if_id_exists_in_target_calendar(event_id: str, target_service) -> dict
         target_service: The Google Calendar API service instance used to interact with the calendar.
 
     Returns:
-        dict:   {
-                EventBody: None if event doesn't exist in target calendar else event body,
-                ToDo: "Create new event" if event doesn't exist in target calendar else "Update" or "Update to recurrence",
-                target_sequence: None if event doesn't exist in target calendar else sequence of the event in target calendar.
-                }.
+
     """
     try:
         target_event = target_service.events().get(calendarId=TARGET_CALENDAR_ID,
                                                    eventId=event_id).execute()
-        # print(f"Event {event_id} exists in target calendar.")
-        target_sequence = target_event.get('sequence')
-        return {"EventBody": target_event, "ToDo": "Update", "target_sequence": target_sequence}
-    except HttpError as error:
-        try:
-            event_id = get_id(event_id)
-            target_event = target_service.events().get(calendarId=TARGET_CALENDAR_ID,
-                                                       eventId=event_id).execute()
-            # print(f"Event {event_id} exists in target calendar.")
-            target_sequence = target_event.get('sequence')
-            return {"EventBody": target_event, "ToDo": "Update to recurrence", "target_sequence": target_sequence}
-        except HttpError as error:
-            return {"EventBody": None, "ToDo": "Create new event", "target_sequence": None}
+        return target_event
+    except HttpError:
+        return None
 
 
 def pop_unnecessary_keys(event_data: EventData) -> None:
@@ -294,19 +266,7 @@ def pop_unnecessary_keys(event_data: EventData) -> None:
         print(f"Exception pop_unnecessary_keys: {e}")
 
 
-def get_id(id: str) -> str:
-    """
-    Removes timeStamp added to id after symbol "_" when event is reccurrence.
-    """
-    position = id.find("_")
-    if position == -1:
-        id = id
-    else:
-        id = id[:position]
-    return id
-
-
-def get_event_details(event: dict, event_data: dict, target_event: dict, change_id: bool):
+def get_event_details(event: dict, event_data: dict, target_event: dict):
     """
     Retrieves details of a specific event and updates instance of class EventData.data.
 
@@ -323,11 +283,6 @@ def get_event_details(event: dict, event_data: dict, target_event: dict, change_
         Beginning of id and iCalUID is the same. iCalUID has at the end @google.com so it has to be removed.
         Uncomment # data if you want to manualy change them."""
         event_data.data = event
-
-        id = event.get('id')
-        if change_id:
-            id = get_id(id)
-        event_data.data.update({"id": id})
 
         summary = event.get('summary')
         summary_prefix_len = summary.find("]") + 1
@@ -384,82 +339,6 @@ def get_event_details(event: dict, event_data: dict, target_event: dict, change_
         return None
 
 
-def count_difference_in_days(events: list) -> int:
-    """
-    Counts difference in days for first two events in events list.
-    Function is used only if recurrence is True.
-    """
-    if all_day_event(events[0]):
-        first_event_start = events[0].get('start').get('date')
-        second_event_start = events[1].get('start').get('date')
-    else:
-        first_event_start = events[0].get('start').get('dateTime')
-        first_event_start = first_event_start[:10]
-        second_event_start = events[1].get('start').get('dateTime')
-        second_event_start = second_event_start[:10]
-    first_event_start = parse(first_event_start)
-    second_event_start = parse(second_event_start)
-    difference_in_days = second_event_start - first_event_start
-    difference_in_days = difference_in_days.days
-    return difference_in_days
-
-
-def recurrence_data(events: list, event_data: dict) -> None:
-    """
-    Checks what frequency and how many recurring events are being created.
-    Updates event_data.data (instance of class EventData).
-    """
-    difference_in_days = count_difference_in_days(events)
-    if difference_in_days == -1:
-        return
-    interval = 1  # default value
-    match difference_in_days:
-        case 1:
-            frequency = "DAILY"
-        case _ if 7 > difference_in_days > 1:
-            frequency = "DAILY"
-            interval = difference_in_days
-        case 7:
-            frequency = "WEEKLY"
-        case 14:
-            frequency = "WEEKLY"
-            interval = 2
-        case 21:
-            frequency = "WEEKLY"
-            interval = 3
-        case 28:
-            frequency = "WEEKLY"
-            interval = 4
-        case 35:
-            frequency = "WEEKLY"
-            interval = 5
-        case _ if 360 > difference_in_days > 7:
-            frequency = "MONTHLY"
-        case _ if difference_in_days > 360:
-            frequency = "YEARLY"
-
-    # If count=250 (max what API gives you at one chunk) then it's infinity
-    count = len(events)
-    if count == 250:
-        recurrence_rule = [
-            f"RRULE:FREQ={frequency};INTERVAL={interval}"]
-    else:
-        recurrence_rule = [
-            f"RRULE:FREQ={frequency};INTERVAL={interval};COUNT={count}"]
-    event_data.data.update({"recurrence": recurrence_rule})
-    return
-
-
-def all_day_event(event: dict) -> bool:
-    """Check if all-day event. If yes returns True. For all day event 'dateTime' is None."""
-    start = event.get('start').get('dateTime')
-    end = event.get('end').get('dateTime')
-    if start == None and end == None:
-        return True
-    else:
-        return False
-
-
 def create_new_event(calendar_id: str, event_data: EventData, service) -> None:
     """
     Creates a new event in the specified calendar.
@@ -469,37 +348,16 @@ def create_new_event(calendar_id: str, event_data: EventData, service) -> None:
         - event_data: An instance of EventData
         - service: The Google Calendar API service instance used to interact with the calendar.
     """
-    if event_data.data.get('id') in event_list_id:
-        print("Not creating event. Event already exists in target calendar.")
-        return
+    # if event_data.data.get('id') in event_list_id:
+    #     print("Not creating event. Event already exists in target calendar.")
+    #     return
     try:
         event = service.events().insert(calendarId=calendar_id,
                                         body=event_data.data, conferenceDataVersion=1, supportsAttachments=True).execute()
         print(
             f"Event created: {event.get('htmlLink')}\n{event_data.data}\n")
-        event_list_id.append(event_data.data.get('id'))
     except Exception as e:
         print(f"Error creating event: {e}")
-
-
-def updated_after_target_calendar(event: dict, event_id: str, target_service) -> bool:
-    """
-    Check if event was already updated.
-    Because several webhooks are being received it won't unnecessary call functions.
-    """
-    # Timestamp of variable 'updated' in primary calendar
-    event_updated = parse(event.get('updated'))
-    # Timestamp of variable 'updated' in target calendar
-    target_event = target_service.events().get(
-        calendarId=TARGET_CALENDAR_ID, eventId=event_id).execute()
-    target_event_updated = parse(target_event.get('updated'))
-
-    time_between_updates = event_updated - target_event_updated
-    if time_between_updates > datetime.timedelta(seconds=0):
-        return True
-    else:
-        # print("Event already updated")
-        return False
 
 
 def update_event(target_service, event_data: EventData, target_event: dict) -> None:
@@ -542,46 +400,33 @@ def notifications():
         target_service = build("calendar", "v3",
                                credentials=TARGET_CREDENTIALS, cache_discovery=False)
         try:
+            page_token = None
             while True:
-                page_token = None
                 # Retrieve the list of events from the master calendar that has been changed in last 10 seconds
                 now_minus_ten_seconds_iso = time_now_minus_ten_seconds()
                 events_result = service.events().list(calendarId=CALENDAR_ID,
                                                       updatedMin=now_minus_ten_seconds_iso,
-                                                      singleEvents=True, maxResults=250, pageToken=page_token).execute()
+                                                      singleEvents=False, maxResults=250, pageToken=page_token).execute()
                 events = events_result.get('items', [])
-                try:
-                    recurrence = check_recurrence(events_result['items'][0])
-                except IndexError:
-                    break
                 if events:
                     for event in events:
                         event_type = event.get('eventType')
                         if event_type == 'workingLocation' or event_type == 'birthday':
                             print("Event type: working location or birthday. Skip.")
                             continue
-                        sequence = event.get('sequence')
+                        # Check if event exists in target calendar - needed to know if it should be updated or created.
+                        # Also if event exists, then check summary prefixes - used in get_event_details function.
                         event_id = event.get('id')
-                        target_event_dict = check_if_id_exists_in_target_calendar(
+                        target_event = check_if_id_exists_in_target_calendar(
                             event_id, target_service)
-                        target_event_sequence = target_event_dict["target_sequence"]
-                        # if sequence is the same it means that event has not been changed
-                        if sequence == target_event_sequence:
-                            continue
-                        target_event = target_event_dict["EventBody"]
-                        # if target_event_data == 404 then target_event = None and don't get target_event_dict
                         event_data = EventData()
                         status = event.get('status')
                         response_status = get_event_response_status(event)
                         if target_event == None and status != 'cancelled' and response_status != 'declined':
                             get_event_details(
-                                event, event_data, target_event, change_id=True)
-                            if recurrence:
-                                recurrence_data(events, event_data)
+                                event, event_data, target_event)
                             create_new_event(TARGET_CALENDAR_ID,
                                              event_data, target_service)
-                            if recurrence:
-                                break
                             continue
                         if status == 'cancelled' or response_status == 'declined':
                             print(
@@ -589,22 +434,12 @@ def notifications():
                             delete_event(TARGET_CALENDAR_ID,
                                          event_id, target_service)
                             continue
-                        if target_event_dict["ToDo"] == "Update to recurrence":
-                            get_event_details(event, event_data,
-                                              target_event, change_id=True)
-                            recurrence_data(events, event_data)
-                            update_event(target_service,
-                                         event_data, target_event)
-                            break
-                        # elif updated_after_target_calendar(event=event, event_id=event_id, target_service=target_service) == True:
                         else:
                             get_event_details(
-                                event, event_data, target_event, change_id=False)
+                                event, event_data, target_event)
                             update_event(target_service,
                                          event_data, target_event)
                             continue
-                        # else:
-                        #     continue
                 page_token = events_result.get('nextPageToken')
                 if not page_token:
                     break
