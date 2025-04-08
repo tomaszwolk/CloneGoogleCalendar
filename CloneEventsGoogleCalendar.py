@@ -9,7 +9,6 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
-from dateutil.parser import parse
 from googleapiclient.errors import HttpError
 
 """
@@ -43,6 +42,30 @@ WEBHOOK_URL = "YOUR_DATA"
 # Channel Id must be unique each time serwer is started
 CHANNEL_ID = str(uuid.uuid4())
 
+""" 
+--- Visbility ---
+"default" - for default value
+"private" - if copied event should be private
+"public" - event and event details is visible for all readers
+None - copy visibility from main calendar
+"""
+VISIBILITY = "YOUR_DATA"
+
+""" 
+--- Enable two-way change of events in calendar. ---
+True - if event copies made in target calendar can modifiy events in main calendar - default
+False - if event copies made in target calendar can't modifiy events in main calendar
+"""
+TWO_WAY_CHANGE = "YOUR_DATA"
+
+# For PREFIXES first key in dictionary is default key for main calendar.
+# Second key is default for target calendar.
+PREFIXES = {
+    "[BTL]": "9",
+    "[MKS]": "7",
+    "[ADSO]": "9",
+}
+
 """
 --- OAuth 2.0 Credentials (Replace with your actual credentials) ---
 # You will need to set up OAuth 2.0 and obtain these credentials
@@ -58,15 +81,6 @@ TARGET_TOKEN_PATH = "YOUR_DATA"
 CREDENTIALS_PATH = "YOUR_DATA"
 CREDENTIALS = None
 TARGET_CREDENTIALS = None
-
-
-# For PREFIXES first key in dictionary is default key for main calendar.
-# Second key is default for target calendar.
-PREFIXES = {
-    "[BTL]": "9",
-    "[MKS]": "7",
-    "[ADSO]": "9",
-}
 
 # --- Load OAuth 2.0 Credentials ---
 
@@ -327,8 +341,8 @@ def get_event_details(event: dict, event_data: dict, target_event: dict):
         event_data.data.update({"summary": summary})
         event_data.data.update({"colorId": color_id})
 
-        # visibility = "private" # option
-        # event_data.data.update({"visibility": visibility})
+        if VISIBILITY is not None or not "YOUR_DATA":
+            event_data.data.update({"visibility": VISIBILITY})
 
         pop_unnecessary_keys(event_data)
 
@@ -337,6 +351,16 @@ def get_event_details(event: dict, event_data: dict, target_event: dict):
         print(
             f"Error getting event details for event {event.get('id')}: {e}. Event details: {event}")
         return None
+
+
+def add_extended_properties(event_data: EventData) -> None:
+    extended_properties = {
+        'shared': {
+            'note': f'Event copied from {CALENDAR_ID}'
+        }
+    }
+    event_data.data.update(
+        {"extendedProperties": extended_properties})
 
 
 def create_new_event(calendar_id: str, event_data: EventData, service) -> None:
@@ -351,6 +375,7 @@ def create_new_event(calendar_id: str, event_data: EventData, service) -> None:
     # if event_data.data.get('id') in event_list_id:
     #     print("Not creating event. Event already exists in target calendar.")
     #     return
+    add_extended_properties(event_data)
     try:
         event = service.events().insert(calendarId=calendar_id,
                                         body=event_data.data, conferenceDataVersion=1, supportsAttachments=True).execute()
@@ -410,6 +435,11 @@ def notifications():
                 events = events_result.get('items', [])
                 if events:
                     for event in events:
+                        extended_properties = event.get(
+                            'extendedProperties', {}).get('shared', {}).get('note', "")
+                        if TWO_WAY_CHANGE == False and extended_properties[:17] == "Event copied from":
+                            print("Event copied from main calendar. Skip.")
+                            continue
                         event_type = event.get('eventType')
                         if event_type == 'workingLocation' or event_type == 'birthday':
                             print("Event type: working location or birthday. Skip.")
