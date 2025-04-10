@@ -58,8 +58,13 @@ False - if event copies made in target calendar can't modifiy events in main cal
 """
 TWO_WAY_CHANGE = "YOUR_DATA"
 
-# For PREFIXES first key in dictionary is default key for main calendar.
-# Second key is default for target calendar.
+"""
+For PREFIXES first key in dictionary is default key for main calendar.
+Second key is default for target calendar.
+#olor ID:
+- 7 - PAW
+- 9 - JAGODA
+"""
 PREFIXES = {
     "[BTL]": "9",
     "[MKS]": "7",
