@@ -9,8 +9,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 # --- Configuration (Replace with your actual values) ---
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
-CALENDAR_ID = "***REMOVED***"
-CALENDAR_ID_TO_ADD = "***REMOVED***"
+CALENDAR_ID = " "
+CALENDAR_ID_TO_ADD = " "
 # --- OAuth 2.0 Credentials (Replace with your actual credentials) ---
 # You will need to set up OAuth 2.0 and obtain these credentials
 # This is a simplified example, you should store these securely
