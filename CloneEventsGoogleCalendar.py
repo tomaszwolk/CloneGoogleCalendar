@@ -458,7 +458,7 @@ def notifications():
                             print("Event copied from main calendar. Skip.")
                             continue
                         event_type = event.get('eventType')
-                        if event_type == 'workingLocation' or event_type == 'birthday':
+                        if event_type == 'workingLocation' or event_type == 'birthday' or event_type == 'outOfOffice':
                             print("Event type: working location or birthday. Skip.")
                             continue
                         # Check if event exists in target calendar - needed to know if it should be updated or created.
