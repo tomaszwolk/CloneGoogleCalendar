@@ -58,8 +58,13 @@ False - if event copies made in target calendar can't modifiy events in main cal
 """
 TWO_WAY_CHANGE = "YOUR_DATA"
 
-# For PREFIXES first key in dictionary is default key for main calendar.
-# Second key is default for target calendar.
+"""
+For PREFIXES first key in dictionary is default key for main calendar.
+Second key is default for target calendar.
+#olor ID:
+- 7 - PAW
+- 9 - JAGODA
+"""
 PREFIXES = {
     "[BTL]": "9",
     "[MKS]": "7",
@@ -118,6 +123,9 @@ if not TARGET_CREDENTIALS or not TARGET_CREDENTIALS.valid:
         token.write(TARGET_CREDENTIALS.to_json())
 
 AUTH_TOKEN = CREDENTIALS.token
+timezone = datetime.timezone(datetime.timedelta(
+    hours=0))  # Choose your serwer timezone
+Last_update_timestamp = datetime.datetime(2025, 4, 1, 8, 0, tzinfo=timezone)
 
 
 class EventData:
@@ -135,10 +143,6 @@ def create_notification_channel(calendar_id: str, webhook_url: str, auth_token: 
         webhook_url (str): The URL to which notifications will be sent.
         auth_token (str): The OAuth 2.0 token for authorization.
         channel_id (str): A unique identifier for the notification channel.
-
-    Optional:
-        token (str): A string token that can be used to verify the origin of notifications. 
-                     This field is commented out in the payload but can be included if needed.
     """
     url = f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/watch"
     headers = {
@@ -168,23 +172,32 @@ def validate_post_request() -> str:
     """
     Allow only POST method.
     """
+    global Last_update_timestamp
+    now = datetime.datetime.now(datetime.timezone.utc)
+    time_now_minus_x_seconds = now - datetime.timedelta(seconds=1)
+    if Last_update_timestamp > time_now_minus_x_seconds:
+        return 208
     if request.method == 'POST':
         # print(f"Full headers: {request.headers}")  # Keep for debugging
         resource_state = request.headers.get('X-Goog-Resource-State')
+        Last_update_timestamp = now
         return resource_state
     else:
         return 405
 
 
-def time_now_minus_ten_seconds() -> str:
+def time_now_minus_seconds(seconds=10):
     """
     Checks actual time and subtract from it 10 seconds.
     It's used for getting list of events.
     """
     now = datetime.datetime.now(datetime.timezone.utc)
-    now_minus_ten_seconds = now - datetime.timedelta(seconds=10)
-    now_minus_ten_seconds_iso = now_minus_ten_seconds.isoformat()
-    return now_minus_ten_seconds_iso
+    now_minus_x_seconds = now - datetime.timedelta(seconds=seconds)
+    return now_minus_x_seconds
+
+
+def time_now_minus_seconds_iso(seconds=10) -> str:
+    return time_now_minus_seconds(seconds).isoformat()
 
 
 def get_event_response_status(event: dict) -> str:
@@ -415,6 +428,9 @@ def notifications():
     if resource_state == 405:
         print("405 - Method Not Allowed")
         return "Method Not Allowed", 405
+    if resource_state == 208:
+        # print("208 - Already Reported")
+        return "Already Reported", 208
     # *** Handle sync messages ***
     if resource_state == 'sync':
         print("This is a sync message.")
@@ -428,7 +444,8 @@ def notifications():
             page_token = None
             while True:
                 # Retrieve the list of events from the master calendar that has been changed in last 10 seconds
-                now_minus_ten_seconds_iso = time_now_minus_ten_seconds()
+                now_minus_ten_seconds_iso = time_now_minus_seconds_iso(
+                    seconds=10)
                 events_result = service.events().list(calendarId=CALENDAR_ID,
                                                       updatedMin=now_minus_ten_seconds_iso,
                                                       singleEvents=False, maxResults=250, pageToken=page_token).execute()
