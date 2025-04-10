@@ -1,16 +1,24 @@
 import os
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
+import configparser
 
 # app = Flask(__name__)
 
-# --- Configuration (Replace with your actual values) ---
+""" 
+--- Configuration (Replace with your actual values) ---
+emails are stored in a file called email.txt. Example how file should look like:
+[emails]
+CALENDAR_ID: "example_1@gmail.com"
+CALENDAR_ID_TO_ADD: "example_2@domain.com"
+"""
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
-CALENDAR_ID = " "
-CALENDAR_ID_TO_ADD = " "
+config = configparser.ConfigParser()
+config.read("email.txt")
+CALENDAR_ID = config.get("emails", "CALENDAR_ID")
+CALENDAR_ID_TO_ADD = config.get("emails", "CALENDAR_ID_TO_ADD")
 # --- OAuth 2.0 Credentials (Replace with your actual credentials) ---
 # You will need to set up OAuth 2.0 and obtain these credentials
 # This is a simplified example, you should store these securely

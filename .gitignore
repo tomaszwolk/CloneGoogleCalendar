@@ -3,6 +3,7 @@ BTM*
 MTB*
 do_testow/
 *.json
+email.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
