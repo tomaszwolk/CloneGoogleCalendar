@@ -369,6 +369,7 @@ def get_event_details(event: dict, event_data: dict, target_event: dict):
         # else event doesn't exists -> add default prefix is it's not been added already
 
         color_id = "0"
+        first_key = next(iter(PREFIXES))
         if target_event:
             # First copy extended properties from target event to event data.
             # It ensures that this property stays the same in target calendar.
@@ -383,7 +384,6 @@ def get_event_details(event: dict, event_data: dict, target_event: dict):
             # Check if prefix should be added.
             target_event_summary = target_event.get('summary')
             target_summary_prefix = event_prefix(target_event_summary)
-            first_key = next(iter(PREFIXES))
             # Means that in main calendar is original with prefix (PREFIXES[0])
             if summary_prefix == list(PREFIXES)[0] and target_summary_prefix == list(PREFIXES)[0]:
                 summary = summary
