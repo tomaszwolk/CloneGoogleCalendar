@@ -68,8 +68,9 @@ Second key is default for target calendar.
 PREFIXES = {
     "[BTL]": "9",
     "[MKS]": "7",
-    "[ADSO]": "9",
+    # "[ADSO]": "9",
 }
+
 
 """
 --- OAuth 2.0 Credentials (Replace with your actual credentials) ---
@@ -200,7 +201,7 @@ def time_now_minus_seconds_iso(seconds=10) -> str:
     return time_now_minus_seconds(seconds).isoformat()
 
 
-def get_event_response_status(event: dict) -> str:
+def get_event_response_status(event: dict, email) -> str:
     """
     Get invitation response status if there are attendees.
     """
@@ -208,10 +209,11 @@ def get_event_response_status(event: dict) -> str:
         attendees = event.get('attendees')
         response_status = ''
         if attendees != None:
-            response_status = get_response_status(attendees, CALENDAR_ID)
+            response_status = get_response_status(attendees, email)
         return response_status
     except Exception as e:
         print(f"Exception getting response status: {e}")
+        return None
 
 
 def get_response_status(attendees: list, email: str = CALENDAR_ID) -> str:
@@ -261,7 +263,8 @@ def check_if_id_exists_in_target_calendar(event_id: str, target_service):
         target_service: The Google Calendar API service instance used to interact with the calendar.
 
     Returns:
-
+        dict: The event data from the target calendar if it exists.
+        None: If the event does not exist in the target calendar.
     """
     try:
         target_event = target_service.events().get(calendarId=TARGET_CALENDAR_ID,
@@ -279,18 +282,60 @@ def pop_unnecessary_keys(event_data: EventData) -> None:
     events in the target calendar. For example:
     - "recurringEventId", "originalStartTime": These are related to recurring events and may conflict with new event creation.
     - "kind", "etag", "created", "updated": These are system-generated fields that are not modifiable.
-    - "htmlLink", "creator", "organizer", "iCalUID", "sequence": These are informational fields that do not affect event functionality.
+    - "htmlLink", "creator" (Read only), "organizer", "iCalUID", "sequence": These are informational fields that do not affect event functionality.
 
     Args:
         event_data (EventData): An instance of the EventData class containing event details.
     """
-    data_to_pop = ("recurringEventId", "kind", "created", "updated", "etag",
-                   "originalStartTime", "htmlLink", "creator", "organizer", "iCalUID", "sequence")
+    data_to_pop = ("recurringEventId", "kind", "created", "updated", "etag", "creator",
+                   "originalStartTime", "htmlLink", "iCalUID", "sequence")
+    # "organizer",
     try:
         event_data.data = {
             key: value for key, value in event_data.data.items() if key not in data_to_pop}
     except Exception as e:
         print(f"Exception pop_unnecessary_keys: {e}")
+
+
+def get_nested_property(data, keys, default=None):
+    """
+    Utility function to safely extract nested properties from a dictionary.
+    """
+    for key in keys:
+        data = data.get(key, default)
+        if data is default:
+            break
+    return data
+
+
+def check_event_origin(data: dict, string: str) -> bool:
+    """
+    Check if the event is created by the user or is a guest event.
+    If returns None that means event is original event or key is just missing.
+    If it is a copy then it should have extendedProperties with 'note' key.
+    """
+    ext_properties_note = get_nested_property(
+        data, ['extendedProperties', 'shared', 'note'])
+    string_to_compare = f"Event copied from {string}"
+    if string_to_compare == ext_properties_note:
+        return True
+    else:
+        return False
+
+
+def event_prefix(summary: str) -> str:
+    """
+    Get prefix from summary and check if it's in the PREFIXES dictionary.
+    Returns None if prefix is not in the dictionary.
+    Returns the key from the dictionary if prefix is in the dictionary.
+    """
+    summary_prefix_len = summary.find("]") + 1
+    if summary_prefix_len == 0:
+        return None
+    summary_prefix = summary[:summary_prefix_len].upper()
+    for key in PREFIXES:
+        if summary_prefix == key:
+            return key
 
 
 def get_event_details(event: dict, event_data: dict, target_event: dict):
@@ -312,7 +357,7 @@ def get_event_details(event: dict, event_data: dict, target_event: dict):
         event_data.data = event
 
         summary = event.get('summary')
-        summary_prefix_len = summary.find("]") + 1
+        summary_prefix = event_prefix(summary)
 
         # Check if event exist in target calendar.
         # If yes then check if summary prefix is:
@@ -325,31 +370,55 @@ def get_event_details(event: dict, event_data: dict, target_event: dict):
 
         color_id = "0"
         if target_event:
+            # First copy extended properties from target event to event data.
+            # It ensures that this property stays the same in target calendar.
+            copy_extended_properties(event_data, target_event)
+            # Check which event is a copy and which is original.
+            # Works only after extended properties were added.
+            event_is_a_copy = check_event_origin(event, TARGET_CALENDAR_ID)
+            target_event_is_a_copy = check_event_origin(
+                target_event, CALENDAR_ID)
+            print(
+                f"Event is a copy: {event_is_a_copy}. Target event is a copy: {target_event_is_a_copy}")
+            # Check if prefix should be added.
             target_event_summary = target_event.get('summary')
-            if summary_prefix_len == 0:
-                first_key = next(iter(PREFIXES))
-                summary = first_key + " " + summary
-                color_id = PREFIXES[first_key]
-            elif summary[:summary_prefix_len] == target_event_summary[:summary_prefix_len] == list(PREFIXES)[1]:
+            target_summary_prefix = event_prefix(target_event_summary)
+            first_key = next(iter(PREFIXES))
+            # Means that in main calendar is original with prefix (PREFIXES[0])
+            if summary_prefix == list(PREFIXES)[0] and target_summary_prefix == list(PREFIXES)[0]:
+                summary = summary
+                color_id = PREFIXES[target_summary_prefix]
+            # Means that in target calendar is original event with prefix (PREFIXES[1])
+            elif summary_prefix == list(PREFIXES)[1] and target_summary_prefix == list(PREFIXES)[1]:
                 summary = summary
                 color_id = "0"
-            elif summary[:summary_prefix_len] == target_event_summary[:summary_prefix_len]:
-                summary = summary
-                color_id = PREFIXES[summary[:summary_prefix_len]]
-            elif summary[:summary_prefix_len] == list(PREFIXES)[1]:
+            # Means that in target calendar is original event without prefix (PREFIXES[1])
+            elif summary_prefix == list(PREFIXES)[1] and target_summary_prefix == None:
+                # Remove prefix from summary
+                summary_prefix_len = summary.find("]") + 1
                 summary = summary[summary_prefix_len + 1:]
                 color_id = "0"
-            else:
-                first_key = next(iter(PREFIXES))
+            # Means that prefix is not in the summary (original event in main calendar)
+            elif summary_prefix == None and target_summary_prefix == list(PREFIXES)[0]:
                 summary = first_key + " " + summary
                 color_id = PREFIXES[first_key]
-        else:
-            first_key = next(iter(PREFIXES))
-            if summary[:summary_prefix_len] == first_key:
-                summary = summary
             else:
+                # Something else, so copy as it is
+                summary = summary
+                color_id = "0"
+        else:  # Means that event doesn't exist in target calendar.
+            if summary_prefix not in list(PREFIXES.keys()):
                 summary = first_key + " " + summary
-            color_id = PREFIXES[first_key]
+                color_id = PREFIXES[first_key]
+            else:
+                for key, value in PREFIXES.items():
+                    if key == summary_prefix:
+                        summary = summary
+                        if key == first_key:
+                            color_id = "0"
+                        else:
+                            color_id = value
+                        break
 
         event_data.data.update({"summary": summary})
         event_data.data.update({"colorId": color_id})
@@ -374,6 +443,20 @@ def add_extended_properties(event_data: EventData) -> None:
     }
     event_data.data.update(
         {"extendedProperties": extended_properties})
+
+
+def copy_extended_properties(event_data: EventData, target_event: dict) -> None:
+    """
+    Copies extended properties from the target event to the event data.
+
+    Args:
+        event_data (EventData): An instance of EventData containing the event details.
+        target_event (dict): The event data from the target calendar."""
+    try:
+        extended_properties = target_event.get('extendedProperties', {})
+        event_data.update('extendedProperties', extended_properties)
+    except Exception as e:
+        return None
 
 
 def create_new_event(calendar_id: str, event_data: EventData, service) -> None:
@@ -419,6 +502,50 @@ def update_event(target_service, event_data: EventData, target_event: dict) -> N
         return
 
 
+def patch_event(target_service, event_data: EventData, target_event_id) -> None:
+    """
+    Updates event in target calendar.
+
+    Args:
+    - target_service: The Google Calendar API service instance used to interact with the calendar.
+    - event_data: An instance of EventData containing the event details to update.
+    - target_event: A dictionary representing the event data from the target calendar. 
+    """
+    try:
+        target_service.events().patch(calendarId=TARGET_CALENDAR_ID,
+                                      eventId=target_event_id, body=event_data.data, conferenceDataVersion=1, supportsAttachments=True, sendUpdates="none").execute()
+        print(
+            f"Event: {event_data.data.get('summary', 'No summary')}, ID: {target_event_id} has been patched.\n{event_data.data}")
+    except Exception as e:
+        print(
+            f"Error patching event {event_data.data.get('summary', 'No summary')}, {target_event_id}: {e}")
+        return
+
+
+def check_if_both_calendars_in_attendees(event: list) -> bool:
+    """
+    Check if both calendars are in the event attendees.
+
+    Args:
+        event (list): list of event attendees."""
+    calendar_id_in_attendees = False
+    target_calendar_id_in_attendees = False
+    attendees = event.get('attendees')
+    try:
+        for attendee in attendees:
+            if attendee.get('email') == CALENDAR_ID:
+                calendar_id_in_attendees = True
+            if attendee.get('email') == TARGET_CALENDAR_ID:
+                target_calendar_id_in_attendees = True
+        if calendar_id_in_attendees and target_calendar_id_in_attendees:
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"Error checking attendees {e}")
+        return False
+
+
 @app.route('/notifications', methods=['POST'])
 def notifications():
     """
@@ -452,14 +579,21 @@ def notifications():
                 events = events_result.get('items', [])
                 if events:
                     for event in events:
-                        extended_properties = event.get(
-                            'extendedProperties', {}).get('shared', {}).get('note', "")
-                        if TWO_WAY_CHANGE == False and extended_properties[:17] == "Event copied from":
+                        # If two way change is disabled and event is a copy then skip it.
+                        event_is_a_copy = check_event_origin(
+                            event, TARGET_CALENDAR_ID)
+                        if TWO_WAY_CHANGE == False and event_is_a_copy == True:
                             print("Event copied from main calendar. Skip.")
                             continue
+                        # Skip events that are not default.
                         event_type = event.get('eventType')
                         if event_type == 'workingLocation' or event_type == 'birthday' or event_type == 'outOfOffice':
-                            print("Event type: working location or birthday. Skip.")
+                            print(
+                                "Event type: working location or birthday or outOfOffice. Skip.")
+                            continue
+                        # Check if CALENDAR_ID and TARGET_CALENDAR_ID are attendees in event.
+                        if check_if_both_calendars_in_attendees(event):
+                            print("Both calendars are in the event. Skip.")
                             continue
                         # Check if event exists in target calendar - needed to know if it should be updated or created.
                         # Also if event exists, then check summary prefixes - used in get_event_details function.
@@ -468,16 +602,29 @@ def notifications():
                             event_id, target_service)
                         event_data = EventData()
                         status = event.get('status')
-                        response_status = get_event_response_status(event)
+                        response_status = get_event_response_status(
+                            event, CALENDAR_ID)
                         if target_event == None and status != 'cancelled' and response_status != 'declined':
                             get_event_details(
                                 event, event_data, target_event)
                             create_new_event(TARGET_CALENDAR_ID,
                                              event_data, target_service)
                             continue
-                        if status == 'cancelled' or response_status == 'declined':
+                        # If event was cancelled, check if target event was declined.
+                        # If yes the leave it be.
+                        if status == 'cancelled' and get_event_response_status(target_event, TARGET_CALENDAR_ID) == 'declined':
                             print(
-                                f"Status: {status}. Response status: {response_status}")
+                                f"Event status: {status} and target event status: {get_event_response_status(target_event)}. Skip.")
+                            continue
+                        # If event was declined then delete it from target calendar.
+                        if target_event and response_status == 'declined':
+                            print(f"Event was declined. Deleting event.")
+                            delete_event(TARGET_CALENDAR_ID,
+                                         event_id, target_service)
+                            continue
+                        # If event was cancelled then delete target event.
+                        if target_event and status == 'cancelled':
+                            print(f"Event status: {status}. Deleting event.")
                             delete_event(TARGET_CALENDAR_ID,
                                          event_id, target_service)
                             continue
