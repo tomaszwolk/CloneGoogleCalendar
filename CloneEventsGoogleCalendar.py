@@ -639,9 +639,6 @@ def notifications():
                         event_id = event.get('id')
                         target_event = check_if_id_exists_in_target_calendar(
                             event_id, target_service)
-                        # Check if sequence of the target_event is bigger. If yes then skip.
-                        if check_if_event_sequence_is_smaller:
-                            continue
                         event_data = EventData()
                         status = event.get('status')
                         response_status = get_event_response_status(
@@ -651,6 +648,9 @@ def notifications():
                                 event, event_data, target_event, change_id=True)
                             create_new_event(TARGET_CALENDAR_ID,
                                              event_data, target_service)
+                            continue
+                        # Check if sequence of the target_event is bigger. If yes then skip.
+                        if check_if_event_sequence_is_smaller:
                             continue
                         # If event was cancelled, check if target event was declined.
                         # If yes the leave it be.
