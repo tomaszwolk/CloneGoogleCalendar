@@ -235,7 +235,7 @@ def get_response_status(attendees: list, email: str = CALENDAR_ID) -> str:
     return None
 
 
-def delete_event(calendar_id: str, event_id: str, target_service) -> None:
+def delete_event(calendar_id: str, event_id: str, target_service, target_event) -> None:
     """
     Deletes an event from the specified calendar. Checks if already event has been deleted if not appends id to list.
 
@@ -247,6 +247,7 @@ def delete_event(calendar_id: str, event_id: str, target_service) -> None:
     try:
         target_service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
         print(f"Event ID: {event_id} deleted")
+        print(target_event)
         return
     except Exception as e:
         print(f"Error deleting event {event_id}: {e}.")
@@ -338,7 +339,16 @@ def event_prefix(summary: str) -> str:
             return key
 
 
-def get_event_details(event: dict, event_data: dict, target_event: dict):
+def get_id(id: str) -> str:
+    position = id.find("_")
+    if position == -1:
+        id = id
+    else:
+        id = id[:position]
+    return id
+
+
+def get_event_details(event: dict, event_data: dict, target_event: dict, change_id: bool = False):
     """
     Retrieves details of a specific event and updates instance of class EventData.data.
 
@@ -355,6 +365,10 @@ def get_event_details(event: dict, event_data: dict, target_event: dict):
         Beginning of id and iCalUID is the same. iCalUID has at the end @google.com so it has to be removed.
         Uncomment # data if you want to manualy change them."""
         event_data.data = event
+
+        if change_id:
+            id = get_id(event.get('id'))
+            event_data.data.update({"id": id})
 
         summary = event.get('summary')
         summary_prefix = event_prefix(summary)
@@ -546,6 +560,29 @@ def check_if_both_calendars_in_attendees(event: list) -> bool:
         return False
 
 
+def check_if_event_sequence_is_smaller(event: dict, target_event: dict) -> bool:
+    """
+    Check if event sequence is smaller in main calendar.
+    If yes then skip it.
+
+    Args:
+        event (dict): The event data from Google Calendar.
+        target_event (dict): The event data from the target calendar.
+    """
+    try:
+        sequence = event.get('sequence')
+        target_sequence = target_event.get('sequence')
+        if sequence <= target_sequence:
+            print(
+                f"Target event sequence = {target_sequence} >= Event sequence = {sequence}. Skip.")
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"Error checking sequence {e}")
+        return False
+
+
 @app.route('/notifications', methods=['POST'])
 def notifications():
     """
@@ -579,6 +616,8 @@ def notifications():
                 events = events_result.get('items', [])
                 if events:
                     for event in events:
+                        # For debugging
+                        print(f"Checking event: {event}")
                         # If two way change is disabled and event is a copy then skip it.
                         event_is_a_copy = check_event_origin(
                             event, TARGET_CALENDAR_ID)
@@ -587,7 +626,7 @@ def notifications():
                             continue
                         # Skip events that are not default.
                         event_type = event.get('eventType')
-                        if event_type == 'workingLocation' or event_type == 'birthday' or event_type == 'outOfOffice':
+                        if event_type == 'workingLocation' or event_type == 'birthday' or event_type == 'outOfOffice' or event_type == 'focusTime':
                             print(
                                 "Event type: working location or birthday or outOfOffice. Skip.")
                             continue
@@ -600,13 +639,16 @@ def notifications():
                         event_id = event.get('id')
                         target_event = check_if_id_exists_in_target_calendar(
                             event_id, target_service)
+                        # Check if sequence of the target_event is bigger. If yes then skip.
+                        if check_if_event_sequence_is_smaller:
+                            continue
                         event_data = EventData()
                         status = event.get('status')
                         response_status = get_event_response_status(
                             event, CALENDAR_ID)
                         if target_event == None and status != 'cancelled' and response_status != 'declined':
                             get_event_details(
-                                event, event_data, target_event)
+                                event, event_data, target_event, change_id=True)
                             create_new_event(TARGET_CALENDAR_ID,
                                              event_data, target_service)
                             continue
@@ -620,13 +662,13 @@ def notifications():
                         if target_event and response_status == 'declined':
                             print(f"Event was declined. Deleting event.")
                             delete_event(TARGET_CALENDAR_ID,
-                                         event_id, target_service)
+                                         event_id, target_service, target_event)
                             continue
                         # If event was cancelled then delete target event.
                         if target_event and status == 'cancelled':
                             print(f"Event status: {status}. Deleting event.")
                             delete_event(TARGET_CALENDAR_ID,
-                                         event_id, target_service)
+                                         event_id, target_service), target_event
                             continue
                         else:
                             get_event_details(
