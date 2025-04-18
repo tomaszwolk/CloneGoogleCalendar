@@ -68,7 +68,7 @@ Second key is default for target calendar.
 PREFIXES = {
     "[BTL]": "9",
     "[MKS]": "7",
-    # "[ADSO]": "9",
+    "[ADSO]": "7",
 }
 
 
@@ -87,46 +87,6 @@ TARGET_TOKEN_PATH = "YOUR_DATA"
 CREDENTIALS_PATH = "YOUR_DATA"
 CREDENTIALS = None
 TARGET_CREDENTIALS = None
-
-# --- Load OAuth 2.0 Credentials ---
-
-
-if os.path.exists(TOKEN_PATH):
-    CREDENTIALS = Credentials.from_authorized_user_file(
-        TOKEN_PATH, SCOPES)
-# If there are no (valid) credentials available, let the user log in.
-if not CREDENTIALS or not CREDENTIALS.valid:
-    if CREDENTIALS and CREDENTIALS.expired and CREDENTIALS.refresh_token:
-        CREDENTIALS.refresh(Request())
-    else:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            CREDENTIALS_PATH, SCOPES
-        )
-        CREDENTIALS = flow.run_local_server(port=0)
-    # Save the credentials for the next run
-    with open(TOKEN_PATH, "w") as token:
-        token.write(CREDENTIALS.to_json())
-
-if os.path.exists(TARGET_TOKEN_PATH):
-    TARGET_CREDENTIALS = Credentials.from_authorized_user_file(
-        TARGET_TOKEN_PATH, SCOPES)
-# If there are no (valid) credentials available, let the user log in.
-if not TARGET_CREDENTIALS or not TARGET_CREDENTIALS.valid:
-    if TARGET_CREDENTIALS and TARGET_CREDENTIALS.expired and TARGET_CREDENTIALS.refresh_token:
-        TARGET_CREDENTIALS.refresh(Request())
-    else:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            CREDENTIALS_PATH, SCOPES
-        )
-        TARGET_CREDENTIALS = flow.run_local_server(port=0)
-    # Save the credentials for the next run
-    with open(TARGET_TOKEN_PATH, "w") as token:
-        token.write(TARGET_CREDENTIALS.to_json())
-
-AUTH_TOKEN = CREDENTIALS.token
-timezone = datetime.timezone(datetime.timedelta(
-    hours=0))  # Choose your serwer timezone
-Last_update_timestamp = datetime.datetime(2025, 4, 1, 8, 0, tzinfo=timezone)
 
 
 class EventData:
@@ -204,6 +164,12 @@ def time_now_minus_seconds_iso(seconds=10) -> str:
 def get_event_response_status(event: dict, email) -> str:
     """
     Get invitation response status if there are attendees.
+
+    Returns:
+        - 'needsAction' - invitation not accepted (default) -> create a new event
+        - 'declined' - invitation declined -> delete the event (it should have been created when the invitation was received)
+        - 'tentative' - the invitation is being considered -> do nothing (event already created)
+        - 'accepted' - invitation accepted -> do nothing (event already created)
     """
     try:
         attendees = event.get('attendees')
@@ -437,7 +403,7 @@ def get_event_details(event: dict, event_data: dict, target_event: dict, change_
         event_data.data.update({"summary": summary})
         event_data.data.update({"colorId": color_id})
 
-        if VISIBILITY is not None or not "YOUR_DATA":
+        if VISIBILITY != "YOUR_DATA":
             event_data.data.update({"visibility": VISIBILITY})
 
         pop_unnecessary_keys(event_data)
@@ -468,7 +434,7 @@ def copy_extended_properties(event_data: EventData, target_event: dict) -> None:
         target_event (dict): The event data from the target calendar."""
     try:
         extended_properties = target_event.get('extendedProperties', {})
-        event_data.update('extendedProperties', extended_properties)
+        event_data.data.update('extendedProperties', extended_properties)
     except Exception as e:
         return None
 
@@ -486,6 +452,7 @@ def create_new_event(calendar_id: str, event_data: EventData, service) -> None:
     #     print("Not creating event. Event already exists in target calendar.")
     #     return
     add_extended_properties(event_data)
+    print(f"Creating event data: {event_data.data}")
     try:
         event = service.events().insert(calendarId=calendar_id,
                                         body=event_data.data, conferenceDataVersion=1, supportsAttachments=True).execute()
@@ -538,6 +505,7 @@ def patch_event(target_service, event_data: EventData, target_event_id) -> None:
 
 def check_if_both_calendars_in_attendees(event: list) -> bool:
     """
+    !!!!! CHENGED TO check_calendars_in_attendees function.!!!!!
     Check if both calendars are in the event attendees.
 
     Args:
@@ -562,6 +530,8 @@ def check_if_both_calendars_in_attendees(event: list) -> bool:
 
 def check_if_event_sequence_is_smaller(event: dict, target_event: dict) -> bool:
     """
+    !!!! DONT USE IT BECAUSE CHANGING RESPONSE STATUS DOESNT AFFECT SEQUENCE NUMBER.!!!!
+
     Check if event sequence is smaller in main calendar.
     If yes then skip it.
 
@@ -581,6 +551,42 @@ def check_if_event_sequence_is_smaller(event: dict, target_event: dict) -> bool:
     except Exception as e:
         print(f"Error checking sequence {e}")
         return False
+
+
+def check_calendars_in_attendees(event: list) -> str:
+    """
+    Check if both calendars are in the event attendees.
+
+    Args:
+        event (list): list of event attendees.
+
+    Returns:
+        - "Both"
+        - "Main"
+        - "Target"
+        - None
+        """
+    calendar_id_in_attendees = False
+    target_calendar_id_in_attendees = False
+    try:
+        attendees = event.get('attendees')
+        print(f"Attendees: {attendees}")
+        for attendee in attendees:
+            if attendee.get('email') == CALENDAR_ID:
+                calendar_id_in_attendees = True
+            if attendee.get('email') == TARGET_CALENDAR_ID:
+                target_calendar_id_in_attendees = True
+        if calendar_id_in_attendees and target_calendar_id_in_attendees:
+            return "Both"
+        if calendar_id_in_attendees and not target_calendar_id_in_attendees:
+            return "Main"
+        if not calendar_id_in_attendees and target_calendar_id_in_attendees:
+            return "Target"
+        else:
+            return None
+    except Exception as e:
+        print(f"Error checking attendees {e}")
+        return None
 
 
 @app.route('/notifications', methods=['POST'])
@@ -616,7 +622,7 @@ def notifications():
                 events = events_result.get('items', [])
                 if events:
                     for event in events:
-                        # For debugging
+                        # For debugging print whole event.
                         print(f"Checking event: {event}")
                         # If two way change is disabled and event is a copy then skip it.
                         event_is_a_copy = check_event_origin(
@@ -631,45 +637,83 @@ def notifications():
                                 "Event type: working location or birthday or outOfOffice. Skip.")
                             continue
                         # Check if CALENDAR_ID and TARGET_CALENDAR_ID are attendees in event.
-                        if check_if_both_calendars_in_attendees(event):
+                        check_attendees = check_calendars_in_attendees(event)
+                        if check_attendees == "Both":
                             print("Both calendars are in the event. Skip.")
                             continue
                         # Check if event exists in target calendar - needed to know if it should be updated or created.
                         # Also if event exists, then check summary prefixes - used in get_event_details function.
+                        # Status -  status of the event. # Response status - status of the invitation (what attendee did).
                         event_id = event.get('id')
-                        target_event = check_if_id_exists_in_target_calendar(
-                            event_id, target_service)
-                        event_data = EventData()
                         status = event.get('status')
                         response_status = get_event_response_status(
                             event, CALENDAR_ID)
-                        if target_event == None and status != 'cancelled' and response_status != 'declined':
-                            get_event_details(
-                                event, event_data, target_event, change_id=True)
-                            create_new_event(TARGET_CALENDAR_ID,
-                                             event_data, target_service)
-                            continue
-                        # Check if sequence of the target_event is bigger. If yes then skip.
-                        if check_if_event_sequence_is_smaller:
-                            continue
-                        # If event was cancelled, check if target event was declined.
-                        # If yes the leave it be.
-                        if status == 'cancelled' and get_event_response_status(target_event, TARGET_CALENDAR_ID) == 'declined':
+                        target_event = check_if_id_exists_in_target_calendar(
+                            event_id, target_service)
+                        event_data = EventData()
+                        # Check attendees and status.
+                        if target_event and check_attendees == "Main":
+                            target_status = target_event.get('status')
+                            target_event_id = target_event.get('id')
+                            target_response_status = get_event_response_status(
+                                target_event, TARGET_CALENDAR_ID)
+                            # If event was cancelled, check if target event was declined.
+                            # If yes the leave it be. It means that other aplication deleted event becasue original event was declined.
+                            if status == 'cancelled' and target_response_status == 'declined':
+                                print(
+                                    f"Event status: {status} and target event status: {get_event_response_status(target_event)}. Skip.")
+                                continue
+                            # If event was declined then delete it from target calendar.
+                            if response_status == 'declined':
+                                print(f"Event was declined. Deleting event.")
+                                delete_event(TARGET_CALENDAR_ID,
+                                             event_id, target_service, target_event)
+                                continue
+                            # If event was cancelled then delete target event.
+                            if status == 'cancelled':
+                                print(
+                                    f"Event status: {status}. Deleting event.")
+                                delete_event(TARGET_CALENDAR_ID,
+                                             event_id, target_service, target_event)
+                                continue
+                            if response_status == 'accepted' and target_status != 'confirmed':
+                                print(
+                                    f"Event response status: {response_status} and target event status: {target_status}. Patching event.")
+                                event_data.data.update({"status": "confirmed"})
+                                patch_event(target_service, event_data,
+                                            target_event_id)
+                            if response_status == 'tentative' and target_status != 'tentative':
+                                print(
+                                    f"Event response status: {response_status} and target event status: {target_status}. Patching event.")
+                                event_data.data.update({"status": "tentative"})
+                                patch_event(target_service, event_data,
+                                            target_event_id)
+                            if target_status != status:
+                                event_data.data.update({"status": status})
+                                patch_event(target_service, event_data,
+                                            target_event_id)
+                                continue
+                        # If event was cancelled then delete target event.
+                        # First check if in target event is attendee with email = TARGET_CALENDAR_ID and not CALENDAR_ID.
+                        target_check_attendees = check_calendars_in_attendees(
+                            target_event)
+                        if status == 'cancelled' and target_check_attendees == "Target":
                             print(
-                                f"Event status: {status} and target event status: {get_event_response_status(target_event)}. Skip.")
+                                f"Event status: {status}. Attendee = Target. Skip")
                             continue
-                        # If event was declined then delete it from target calendar.
-                        if target_event and response_status == 'declined':
-                            print(f"Event was declined. Deleting event.")
+                        if status == 'cancelled':
+                            print(
+                                f"Event status: {status}. Deleting event.")
                             delete_event(TARGET_CALENDAR_ID,
                                          event_id, target_service, target_event)
                             continue
-                        # If event was cancelled then delete target event.
-                        if target_event and status == 'cancelled':
-                            print(f"Event status: {status}. Deleting event.")
-                            delete_event(TARGET_CALENDAR_ID,
-                                         event_id, target_service), target_event
+                        if target_event == None and status != 'cancelled' and response_status != 'declined':
+                            get_event_details(
+                                event, event_data, target_event, change_id=True)
+                            create_new_event(
+                                TARGET_CALENDAR_ID, event_data, target_service)
                             continue
+                        # ADD SEQUENCE CHECKING HERE?
                         else:
                             get_event_details(
                                 event, event_data, target_event)
@@ -684,11 +728,50 @@ def notifications():
     return "OK", 200
 
 
-# --- Run the channel creation when the app starts ---
-with app.app_context():
-    create_notification_channel(
-        CALENDAR_ID, WEBHOOK_URL, AUTH_TOKEN, CHANNEL_ID)
-
 # --- Run the Flask app ---
 if __name__ == '__main__':
+    # --- Load OAuth 2.0 Credentials ---
+    if os.path.exists(TOKEN_PATH):
+        CREDENTIALS = Credentials.from_authorized_user_file(
+            TOKEN_PATH, SCOPES)
+    # If there are no (valid) credentials available, let the user log in.
+    if not CREDENTIALS or not CREDENTIALS.valid:
+        if CREDENTIALS and CREDENTIALS.expired and CREDENTIALS.refresh_token:
+            CREDENTIALS.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                CREDENTIALS_PATH, SCOPES
+            )
+            CREDENTIALS = flow.run_local_server(port=0)
+        # Save the credentials for the next run
+        with open(TOKEN_PATH, "w") as token:
+            token.write(CREDENTIALS.to_json())
+
+    if os.path.exists(TARGET_TOKEN_PATH):
+        TARGET_CREDENTIALS = Credentials.from_authorized_user_file(
+            TARGET_TOKEN_PATH, SCOPES)
+    # If there are no (valid) credentials available, let the user log in.
+    if not TARGET_CREDENTIALS or not TARGET_CREDENTIALS.valid:
+        if TARGET_CREDENTIALS and TARGET_CREDENTIALS.expired and TARGET_CREDENTIALS.refresh_token:
+            TARGET_CREDENTIALS.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                CREDENTIALS_PATH, SCOPES
+            )
+            TARGET_CREDENTIALS = flow.run_local_server(port=0)
+        # Save the credentials for the next run
+        with open(TARGET_TOKEN_PATH, "w") as token:
+            token.write(TARGET_CREDENTIALS.to_json())
+
+    AUTH_TOKEN = CREDENTIALS.token
+    timezone = datetime.timezone(datetime.timedelta(
+        hours=0))  # Choose your serwer timezone
+    Last_update_timestamp = datetime.datetime(
+        2025, 4, 1, 8, 0, tzinfo=timezone)
+
+    # --- Run the channel creation when the app starts ---
+    with app.app_context():
+        create_notification_channel(
+            CALENDAR_ID, WEBHOOK_URL, AUTH_TOKEN, CHANNEL_ID)
+
     app.run()
