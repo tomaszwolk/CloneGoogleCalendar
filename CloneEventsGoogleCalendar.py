@@ -382,6 +382,9 @@ def get_event_details(event: dict, event_data: dict, target_event: dict, change_
             elif summary_prefix == None and target_summary_prefix == list(PREFIXES)[0]:
                 summary = first_key + " " + summary
                 color_id = PREFIXES[first_key]
+            elif summary_prefix == target_summary_prefix:
+                summary = summary
+                color_id = event.get('colorId')
             else:
                 # Something else, so copy as it is
                 summary = summary
@@ -676,6 +679,13 @@ def notifications():
                                 delete_event(TARGET_CALENDAR_ID,
                                              event_id, target_service, target_event)
                                 continue
+                            if response_status == 'accepted' and target_status == 'cancelled':
+                                print(
+                                    f"Event response status: {response_status} and target event status: {target_status}. Updating event.")
+                                get_event_details(
+                                    event, event_data, target_event)
+                                update_event(target_service,
+                                             event_data, target_event)
                             if response_status == 'accepted' and target_status != 'confirmed':
                                 print(
                                     f"Event response status: {response_status} and target event status: {target_status}. Patching event.")
