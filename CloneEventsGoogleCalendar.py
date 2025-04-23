@@ -129,36 +129,34 @@ def create_notification_channel(calendar_id: str, webhook_url: str, auth_token: 
         return response.json()
 
 
-def validate_post_request() -> str:
+def validate_post_request(time_now) -> str:
     """
     Allow only POST method.
     """
     global Last_update_timestamp
-    now = datetime.datetime.now(datetime.timezone.utc)
-    time_now_minus_x_seconds = now - datetime.timedelta(seconds=1)
+    time_now_minus_x_seconds = time_now - datetime.timedelta(seconds=1)
     if Last_update_timestamp > time_now_minus_x_seconds:
         return 208
     if request.method == 'POST':
         # print(f"Full headers: {request.headers}")  # Keep for debugging
         resource_state = request.headers.get('X-Goog-Resource-State')
-        Last_update_timestamp = now
+        Last_update_timestamp = time_now
         return resource_state
     else:
         return 405
 
 
-def time_now_minus_seconds(seconds=10):
+def time_now_minus_seconds(time_now, seconds=10):
     """
     Checks actual time and subtract from it 10 seconds.
     It's used for getting list of events.
     """
-    now = datetime.datetime.now(datetime.timezone.utc)
-    now_minus_x_seconds = now - datetime.timedelta(seconds=seconds)
+    now_minus_x_seconds = time_now - datetime.timedelta(seconds=seconds)
     return now_minus_x_seconds
 
 
-def time_now_minus_seconds_iso(seconds=10) -> str:
-    return time_now_minus_seconds(seconds).isoformat()
+def time_now_minus_seconds_iso(time_now, seconds=10) -> str:
+    return time_now_minus_seconds(time_now, seconds).isoformat()
 
 
 def get_event_response_status(event: dict, email) -> str:
@@ -418,17 +416,41 @@ def get_event_details(event: dict, event_data: dict, target_event: dict, change_
         return None
 
 
-def add_extended_properties(event_data: EventData) -> None:
+def add_extended_properties(event_data: EventData, time_now: datetime) -> None:
     extended_properties = {
         'shared': {
-            'note': f'Event copied from {CALENDAR_ID}'
+            'note': f'Event copied from {CALENDAR_ID}',
+            'timestamp': time_now.isoformat()
         }
     }
     event_data.data.update(
         {"extendedProperties": extended_properties})
 
 
-def copy_extended_properties(event_data: EventData, target_event: dict) -> None:
+def check_timestamp(event: dict, time_now: datetime):
+    """
+    Check if timestamp is smaller than now minus 10 seconds.
+    If yes then return True -> update event.
+    If no then return False -> skip.
+    If no timestamp in event data then return None.
+    """
+    try:
+        timestamp = event.get('extendedProperties', {}).get(
+            'shared', {}).get('timestamp')
+        if timestamp:
+            timestamp = datetime.datetime.fromisoformat(timestamp)
+            if timestamp < time_now_minus_seconds(time_now, 10):
+                return True
+            else:
+                return False
+        else:
+            return None
+    except Exception as e:
+        print(f"Error checking timestamp: {e}")
+        return False
+
+
+def copy_extended_properties(event_data: EventData, event: dict) -> None:
     """
     Copies extended properties from the target event to the event data.
 
@@ -436,13 +458,31 @@ def copy_extended_properties(event_data: EventData, target_event: dict) -> None:
         event_data (EventData): An instance of EventData containing the event details.
         target_event (dict): The event data from the target calendar."""
     try:
-        extended_properties = target_event.get('extendedProperties', {})
-        event_data.data.update('extendedProperties', extended_properties)
+        extended_properties = event.get('extendedProperties', {})
+        event_data.data.update({'extendedProperties': extended_properties})
     except Exception as e:
         return None
 
 
-def create_new_event(calendar_id: str, event_data: EventData, service) -> None:
+def update_extended_properties_timestamp(event_data: EventData, time_now: datetime) -> None:
+    """
+    Updates the timestamp in the extended properties of the event data.
+
+    Args:
+        event_data (EventData): An instance of EventData containing the event details.
+        time_now (datetime):  The current time in UTC."""
+    try:
+        if 'extendedProperties' in event_data.data and 'shared' in event_data.data['extendedProperties']:
+            event_data.data['extendedProperties']['shared'].update(
+                {'timestamp': time_now.isoformat()})
+        else:
+            event_data.data.setdefault('extendedProperties', {}).setdefault(
+                'shared', {}).update({'timestamp': time_now.isoformat()})
+    except Exception as e:
+        print(f"Error updating timestamp: {e}")
+
+
+def create_new_event(calendar_id: str, event_data: EventData, service, time_now) -> None:
     """
     Creates a new event in the specified calendar.
 
@@ -454,7 +494,7 @@ def create_new_event(calendar_id: str, event_data: EventData, service) -> None:
     # if event_data.data.get('id') in event_list_id:
     #     print("Not creating event. Event already exists in target calendar.")
     #     return
-    add_extended_properties(event_data)
+    add_extended_properties(event_data, time_now)
     print(f"Creating event data: {event_data.data}")
     try:
         event = service.events().insert(calendarId=calendar_id,
@@ -597,7 +637,8 @@ def notifications():
     """
     Handles incoming notification messages from the Google Calendar API.
     """
-    resource_state = validate_post_request()
+    time_now = datetime.datetime.now(datetime.timezone.utc)
+    resource_state = validate_post_request(time_now)
     if resource_state == 405:
         print("405 - Method Not Allowed")
         return "Method Not Allowed", 405
@@ -618,7 +659,7 @@ def notifications():
             while True:
                 # Retrieve the list of events from the master calendar that has been changed in last 10 seconds
                 now_minus_ten_seconds_iso = time_now_minus_seconds_iso(
-                    seconds=10)
+                    time_now=time_now, seconds=10)
                 events_result = service.events().list(calendarId=CALENDAR_ID,
                                                       updatedMin=now_minus_ten_seconds_iso,
                                                       singleEvents=False, maxResults=250, pageToken=page_token).execute()
@@ -639,6 +680,41 @@ def notifications():
                             print(
                                 "Event type: working location or birthday or outOfOffice. Skip.")
                             continue
+                        event_id = event.get('id')
+                        status = event.get('status')
+                        response_status = get_event_response_status(
+                            event, CALENDAR_ID)
+                        target_event = check_if_id_exists_in_target_calendar(
+                            event_id, target_service)
+                        event_data = EventData()
+                        # Check if target event extended properties are the same as in main calendar.
+                        # If empty in target, then copy them from main calendar.
+                        # If not empty then check if timestamp is older than 10 seconds.
+                        # If not then skip it. If yes then check further.
+                        if target_event and status != 'cancelled':
+                            target_event_timestamp = target_event.get('extendedProperties', {}).get(
+                                'shared', {}).get('timestamp', None)
+                            event_timestamp = event.get('extendedProperties', {}).get(
+                                'shared', {}).get('timestamp', None)
+                            if target_event_timestamp and event_timestamp == None:
+                                print(
+                                    "Event timestamp is None. Skip.")
+                                continue
+                            if target_event_timestamp == None and event_timestamp:
+                                target_event_id = target_event.get('id')
+                                copy_extended_properties(
+                                    event_data, event)
+                                patch_event(target_service,
+                                            event_data, target_event_id)
+                                continue
+                            if target_event_timestamp > event_timestamp:
+                                print(
+                                    f"Target timestamp: {target_event_timestamp} is newer than event timestamp: {event_timestamp}. Skip.")
+                                continue
+                            if check_timestamp(event, time_now) == False:
+                                print(
+                                    f"Timestamp is not older than 10 seconds. Skip.")
+                                continue
                         # Check if CALENDAR_ID and TARGET_CALENDAR_ID are attendees in event.
                         check_attendees = check_calendars_in_attendees(event)
                         if check_attendees == "Both":
@@ -647,13 +723,6 @@ def notifications():
                         # Check if event exists in target calendar - needed to know if it should be updated or created.
                         # Also if event exists, then check summary prefixes - used in get_event_details function.
                         # Status -  status of the event. # Response status - status of the invitation (what attendee did).
-                        event_id = event.get('id')
-                        status = event.get('status')
-                        response_status = get_event_response_status(
-                            event, CALENDAR_ID)
-                        target_event = check_if_id_exists_in_target_calendar(
-                            event_id, target_service)
-                        event_data = EventData()
                         # Check attendees and status.
                         if target_event and check_attendees == "Main":
                             target_status = target_event.get('status')
@@ -684,22 +753,30 @@ def notifications():
                                     f"Event response status: {response_status} and target event status: {target_status}. Updating event.")
                                 get_event_details(
                                     event, event_data, target_event)
+                                update_extended_properties_timestamp(
+                                    event_data, time_now)
                                 update_event(target_service,
                                              event_data, target_event)
                             if response_status == 'accepted' and target_status != 'confirmed':
                                 print(
                                     f"Event response status: {response_status} and target event status: {target_status}. Patching event.")
                                 event_data.data.update({"status": "confirmed"})
+                                update_extended_properties_timestamp(
+                                    event_data, time_now)
                                 patch_event(target_service, event_data,
                                             target_event_id)
                             if response_status == 'tentative' and target_status != 'tentative':
                                 print(
                                     f"Event response status: {response_status} and target event status: {target_status}. Patching event.")
                                 event_data.data.update({"status": "tentative"})
+                                update_extended_properties_timestamp(
+                                    event_data, time_now)
                                 patch_event(target_service, event_data,
                                             target_event_id)
                             if target_status != status:
                                 event_data.data.update({"status": status})
+                                update_extended_properties_timestamp(
+                                    event_data, time_now)
                                 patch_event(target_service, event_data,
                                             target_event_id)
                                 continue
@@ -721,12 +798,13 @@ def notifications():
                             get_event_details(
                                 event, event_data, target_event, change_id=True)
                             create_new_event(
-                                TARGET_CALENDAR_ID, event_data, target_service)
+                                TARGET_CALENDAR_ID, event_data, target_service, time_now)
                             continue
-                        # ADD SEQUENCE CHECKING HERE?
                         else:
                             get_event_details(
                                 event, event_data, target_event)
+                            update_extended_properties_timestamp(
+                                event_data, time_now)
                             update_event(target_service,
                                          event_data, target_event)
                             continue
