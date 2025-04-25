@@ -612,7 +612,7 @@ def create_new_event(calendar_id: str, event_data: EventData, service, time_now)
         print(f"Error creating event: {e}")
 
 
-def update_event(target_service, event_data: EventData, target_event: dict) -> None:
+def update_event(target_service, event_data: EventData, target_event_id: str) -> None:
     """
     Updates event in target calendar.
 
@@ -621,7 +621,6 @@ def update_event(target_service, event_data: EventData, target_event: dict) -> N
     - event_data: An instance of EventData containing the event details to update.
     - target_event: A dictionary representing the event data from the target calendar. 
     """
-    target_event_id = target_event.get('id')
     try:
         target_service.events().update(calendarId=TARGET_CALENDAR_ID,
                                        eventId=target_event_id, body=event_data.data, conferenceDataVersion=1, supportsAttachments=True).execute()
@@ -824,8 +823,8 @@ def notifications():
                             # So you need to create new event I should not be checking it
                             # target_event_id = event_id
                           if event_is_a_copy == False and target_event is not None:
-                              # You shoul update it.
-                              target_event_id = get_id(event_id) # NEED TO CHECK get_it
+                              # You should update it.
+                              target_event_id = get_id(event_id)
                         event_data = EventData()
                         # Check if target event extended properties are the same as in main calendar.
                         # If empty in target, then copy them from main calendar.
@@ -858,7 +857,7 @@ def notifications():
                         # Check attendees and status.
                         if target_event and check_attendees == "Main":
                             target_status = target_event.get('status')
-                            target_event_id = target_event.get('id')
+                            # target_event_id = target_event.get('id') # Using something else
                             target_response_status = get_event_response_status(
                                 target_event, TARGET_CALENDAR_ID)
                             # If event was cancelled, check if target event was declined.
@@ -888,7 +887,7 @@ def notifications():
                                 update_extended_properties_timestamp(
                                     event_data, time_now)
                                 update_event(target_service,
-                                             event_data, target_event)
+                                             event_data, target_event_id)
                                 extended_properties = create_extended_properties(original_id,
                                     time_now, event_is_a_copy)
                                 event_data = EventData()
@@ -978,7 +977,7 @@ def notifications():
                             update_extended_properties_timestamp(
                                 event_data, time_now)
                             update_event(target_service,
-                                         event_data, target_event)
+                                         event_data, target_event_id)
                             extended_properties = create_extended_properties(original_id,
                                 time_now, event_is_a_copy)
                             event_data = EventData()
