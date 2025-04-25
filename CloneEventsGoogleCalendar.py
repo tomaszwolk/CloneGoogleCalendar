@@ -749,13 +749,16 @@ def check_original_id(event_id: str, event_data: dict, event_is_a_copy: bool) ->
         # If ext_properties_id is None then it means that event is original event and target event does't exists.
         # If event is a copy then it should have originalID in extended properties.
         if ext_properties_id is None:
-            return event_id,  "This is original event. Maybe remove _ for target to create."
+            # "This is original event. Maybe remove _ for target to create."
+            return event_id
         else:
-            return ext_properties_id, "This is original event. Maybe remove _ for target to update."
+            # "This is original event. Maybe remove _ for target to update."
+            return ext_properties_id
     else:
         # In extended properties is target event id.
         # If it's a copy so You can only update it.
-        return ext_properties_id, "This is copy event. Returned ID is ok for target."
+        # "This is copy event. Returned ID is ok for target."
+        return ext_properties_id
 
 
 @app.route('/notifications', methods=['POST'])
@@ -812,7 +815,7 @@ def notifications():
                             event, CALENDAR_ID)
                         original_id = check_original_id(event_id, event, event_is_a_copy)
                         if event_is_a_copy == True:
-                            target_event_id = original_id[0]
+                            target_event_id = original_id
                         else:
                             target_event_id = get_id(original_id)
                         target_event = check_if_id_exists_in_target_calendar(
