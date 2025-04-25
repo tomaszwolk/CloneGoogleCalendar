@@ -11,8 +11,8 @@ import configparser
 --- Configuration (Replace with your actual values) ---
 emails are stored in a file called email.txt. Example how file should look like:
 [emails]
-CALENDAR_ID: "example_1@gmail.com"
-CALENDAR_ID_TO_ADD: "example_2@domain.com"
+CALENDAR_ID: "mks.test@mks-meble.pl"
+CALENDAR_ID_TO_ADD: "btl.test@botland.com.pl"
 """
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 config = configparser.ConfigParser()

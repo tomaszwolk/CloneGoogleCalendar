@@ -16,11 +16,13 @@ Calendar Synchronization.
 Functions to be performed by the application:
 1. automatically generate tokens when they are missing or expired
 2. create a webhook with google calendar API
-3. retrieve the list of events from the master calendar upon receipt of the webhook
+3. retrieve the list of events from master calendar upon receipt of the webhook
 4. checking if the event is all-day or has specific times (start and end)
 5. checking the status of the event:
-    - adding a new event to the target calendar if it was created by the owner or appeared as a guest
-    - if the event is “cancelled” or the invitation was not accepted then remove the event from the target calendar
+    - adding a new event to the target calendar if it was created by the owner
+        or appeared as a guest
+    - if the event is “cancelled” or the invitation was not accepted then
+        remove the event from the target calendar
 6 Create a new event in the target calendar, requirements:
     - if the event does not exist in the target calendar
     - copy all and modify summary
@@ -33,7 +35,8 @@ app = Flask(__name__)
 # --- Configuration (Replace with your actual values) ---
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 # Replace with your calendar ID in e-mail format (e.g., example@gmail.com).
-# Using 'primary' instead of an email address will cause issues when checking the 'responseStatus' of attendees.
+# Using 'primary' instead of an email address will cause issues when checking
+# the 'responseStatus' of attendees.
 CALENDAR_ID = "YOUR_DATA"
 # Replace with your calendar ID, string
 TARGET_CALENDAR_ID = "YOUR_DATA"
@@ -51,10 +54,10 @@ None - copy visibility from main calendar
 """
 VISIBILITY = "YOUR_DATA"
 
-""" 
+"""
 --- Enable two-way change of events in calendar. ---
-True - if event copies made in target calendar can modifiy events in main calendar - default
-False - if event copies made in target calendar can't modifiy events in main calendar
+True - event copies made in target can modifiy events in main calendar-default
+False - event copies made in target can't modifiy events in main calendar
 """
 TWO_WAY_CHANGE = "YOUR_DATA"
 
@@ -76,17 +79,23 @@ PREFIXES = {
 --- OAuth 2.0 Credentials (Replace with your actual credentials) ---
 # You will need to set up OAuth 2.0 and obtain these credentials
 # This is a simplified example, you should store these securely
-# Consider using environment variables or a secrets management service like AWS Secrets Manager, Azure Key Vault, or Google Cloud Secret Manager.
+# Consider using environment variables or a secrets management service like 
+# AWS Secrets Manager, Azure Key Vault, or Google Cloud Secret Manager.
 # For example, to use environment variables:
 # import os
 # TOKEN_PATH = os.getenv('TOKEN_PATH')
 # CREDENTIALS_PATH = os.getenv('CREDENTIALS_PATH')
 # """
-TOKEN_PATH = "YOUR_DATA"
-TARGET_TOKEN_PATH = "YOUR_DATA"
-CREDENTIALS_PATH = "YOUR_DATA"
+TOKEN_PATH = "YOUR_DATA"  # example /token.json
+TARGET_TOKEN_PATH = "YOUR_DATA"  # example /target_token.json
+CREDENTIALS_PATH = "YOUR_DATA"  # example /credentials.json
 CREDENTIALS = None
 TARGET_CREDENTIALS = None
+AUTH_TOKEN = None
+
+timezone = datetime.timezone(datetime.timedelta(
+    hours=0))  # Choose your serwer timezone
+Last_update_timestamp = datetime.datetime(2025, 4, 1, 8, 0, tzinfo=timezone)
 
 
 class EventData:
@@ -95,12 +104,58 @@ class EventData:
         }
 
 
-def create_notification_channel(calendar_id: str, webhook_url: str, auth_token: str, channel_id: str):
+def create_token():
+    """
+    Creates a token for the Google Calendar API.
+    """
+    global CREDENTIALS, TARGET_CREDENTIALS, AUTH_TOKEN
+    global TOKEN_PATH, TARGET_TOKEN_PATH, CREDENTIALS_PATH, SCOPES
+    # --- Load OAuth 2.0 Credentials ---
+    if os.path.exists(TOKEN_PATH):
+        CREDENTIALS = Credentials.from_authorized_user_file(
+            TOKEN_PATH, SCOPES)
+    # If there are no (valid) credentials available, let the user log in.
+    if not CREDENTIALS or not CREDENTIALS.valid:
+        if CREDENTIALS and CREDENTIALS.expired and CREDENTIALS.refresh_token:
+            CREDENTIALS.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                CREDENTIALS_PATH, SCOPES
+            )
+            CREDENTIALS = flow.run_local_server(port=0)
+        # Save the credentials for the next run
+        with open(TOKEN_PATH, "w") as token:
+            token.write(CREDENTIALS.to_json())
+
+    if os.path.exists(TARGET_TOKEN_PATH):
+        TARGET_CREDENTIALS = Credentials.from_authorized_user_file(
+            TARGET_TOKEN_PATH, SCOPES)
+    # If there are no (valid) credentials available, let the user log in.
+    if not TARGET_CREDENTIALS or not TARGET_CREDENTIALS.valid:
+        if TARGET_CREDENTIALS and TARGET_CREDENTIALS.expired and TARGET_CREDENTIALS.refresh_token:
+            TARGET_CREDENTIALS.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                CREDENTIALS_PATH, SCOPES
+            )
+            TARGET_CREDENTIALS = flow.run_local_server(port=0)
+        # Save the credentials for the next run
+        with open(TARGET_TOKEN_PATH, "w") as token:
+            token.write(TARGET_CREDENTIALS.to_json())
+
+    AUTH_TOKEN = CREDENTIALS.token
+
+
+def create_notification_channel(calendar_id: str,
+                                webhook_url: str,
+                                auth_token: str,
+                                channel_id: str):
     """
     Creates a notification channel for a given calendar.
 
     Args:
-        calendar_id (str): The ID of the calendar to create the notification channel for.
+        calendar_id (str): The ID of the calendar to create the notification
+            channel for.
         webhook_url (str): The URL to which notifications will be sent.
         auth_token (str): The OAuth 2.0 token for authorization.
         channel_id (str): A unique identifier for the notification channel.
@@ -164,16 +219,24 @@ def get_event_response_status(event: dict, email) -> str:
     Get invitation response status if there are attendees.
 
     Returns:
-        - 'needsAction' - invitation not accepted (default) -> create a new event
-        - 'declined' - invitation declined -> delete the event (it should have been created when the invitation was received)
-        - 'tentative' - the invitation is being considered -> do nothing (event already created)
-        - 'accepted' - invitation accepted -> do nothing (event already created)
+        - 'needsAction' - invitation not accepted (default) ->
+            create a new event
+        - 'declined' - invitation declined ->
+            delete the event (it was created when the invitation was received)
+        - 'tentative' - the invitation is being considered ->
+            do nothing (event already created)
+        - 'accepted' - invitation accepted ->
+            do nothing (event already created)
     """
     try:
         attendees = event.get('attendees')
         response_status = ''
-        if attendees != None:
-            response_status = get_response_status(attendees, email)
+        if attendees is not None:
+            for attendee in attendees:
+                if attendee['email'] == email:
+                    return attendee.get('responseStatus')
+                else:
+                    return None
         return response_status
     except Exception as e:
         print(f"Exception getting response status: {e}")
@@ -188,10 +251,14 @@ def get_response_status(attendees: list, email: str = CALENDAR_ID) -> str:
         email (str): Email of the main user.
 
     Possible options:
-        - 'needsAction' - invitation not accepted (default) -> create a new event
-        - 'declined' - invitation declined -> delete the event (it should have been created when the invitation was received)
-        - 'tentative' - the invitation is being considered -> do nothing (event already created)
-        - 'accepted' - invitation accepted -> do nothing (event already created)
+        - 'needsAction' - invitation not accepted (default) ->
+            create a new event
+        - 'declined' - invitation declined ->
+            delete the event (it was created when the invitation was received)
+        - 'tentative' - the invitation is being considered ->
+            do nothing (event already created)
+        - 'accepted' - invitation accepted ->
+            do nothing (event already created)
     """
     for attendee in attendees:
         if attendee['email'] == email:
@@ -304,15 +371,44 @@ def event_prefix(summary: str) -> str:
 
 
 def get_id(id: str) -> str:
+    """
+    Check if id has '_' in it.
+    Depend on the position it is it can be:
+    - made from mobile - '_xxxxxxxx_xxxxxx'
+    - all-day recurrence - 'xxxxxx_20250401
+    - recurrence - 'xxxxxx_20250401T200000Z
+    
+    Args:
+        - id (str): String to check
+
+    Returns:
+        - str: id to use as target event id
+    """
     position = id.find("_")
+    # If position = -1, then '_' is not in string
     if position == -1:
-        id = id
-    else:
+        return id
+    # If position = 0, then it's mobile. Replace "_"
+    if position == 0:
+        id = id.replace("_", "")
+        return id
+    id_len = len(id)
+    after_underscore = id[position+1:id_len]
+    after_underscore_len = len(after_underscore)
+    after_underscore_all_digits = after_underscore.isdigit()
+    # If after "_" is 8 digits then it's all-day recurrence
+    if after_underscore_len == 8 and after_underscore_all_digits:
         id = id[:position]
-    return id
+        return id
+    # If ater "_" is 16 digits and has "T" and "Z" then it's recurrence
+    if after_underscore_len == 16 and id[position + 9] == 'T' and id[position + 16] == 'Z':
+        id = id[:position]
+        return id
+    else:  
+        id = id.replace("_", "")
+        return id
 
-
-def get_event_details(event: dict, event_data: dict, target_event: dict, change_id: bool = False):
+def get_event_details(event: dict, event_data: EventData, target_event: dict, change_id: bool = False):
     """
     Retrieves details of a specific event and updates instance of class EventData.data.
 
@@ -321,6 +417,7 @@ def get_event_details(event: dict, event_data: dict, target_event: dict, change_
         event_data (EventData): An instance of EventData to store the event details.
         target_event (dict): The event data from the target calendar, used to compare and update details.
         change_id (bool): A flag indicating whether to modify the event ID to remove recurrence-specific timestamps.
+                Only used here when new event is created.
     """
     try:
         """
@@ -415,7 +512,7 @@ def get_event_details(event: dict, event_data: dict, target_event: dict, change_
         return None
 
 
-def create_extended_properties(time_now: datetime, event_is_a_copy=False) -> None:
+def create_extended_properties(event_id, time_now: datetime, event_is_a_copy=False) -> None:
     if event_is_a_copy:
         calendar_id = TARGET_CALENDAR_ID
     else:
@@ -423,7 +520,8 @@ def create_extended_properties(time_now: datetime, event_is_a_copy=False) -> Non
     extended_properties = {
         'shared': {
             'note': f'Event copied from {calendar_id}',
-            'timestamp': time_now.isoformat()
+            'timestamp': time_now.isoformat(),
+            'originalID': event_id
         }
     }
     return extended_properties
@@ -621,24 +719,43 @@ def check_calendars_in_attendees(event: list) -> str:
     calendar_id_in_attendees = False
     target_calendar_id_in_attendees = False
     try:
-        attendees = event.get('attendees')
+        attendees = event.get('attendees', False)
         print(f"Attendees: {attendees}")
-        for attendee in attendees:
-            if attendee.get('email') == CALENDAR_ID:
-                calendar_id_in_attendees = True
-            if attendee.get('email') == TARGET_CALENDAR_ID:
-                target_calendar_id_in_attendees = True
-        if calendar_id_in_attendees and target_calendar_id_in_attendees:
-            return "Both"
-        if calendar_id_in_attendees and not target_calendar_id_in_attendees:
-            return "Main"
-        if not calendar_id_in_attendees and target_calendar_id_in_attendees:
-            return "Target"
+        if attendees:
+            for attendee in attendees:
+                if attendee.get('email', 'no email') == CALENDAR_ID:
+                    calendar_id_in_attendees = True
+                if attendee.get('email', 'no email') == TARGET_CALENDAR_ID:
+                    target_calendar_id_in_attendees = True
+            if calendar_id_in_attendees and target_calendar_id_in_attendees:
+                return "Both"
+            if calendar_id_in_attendees and not target_calendar_id_in_attendees:
+                return "Main"
+            if not calendar_id_in_attendees and target_calendar_id_in_attendees:
+                return "Target"
+            else:
+                return None
         else:
             return None
     except Exception as e:
         print(f"Error checking attendees {e}")
         return None
+
+
+def check_original_id(event_id: str, event_data: dict, event_is_a_copy: bool) -> str:
+    ext_properties_id = get_nested_property(
+        event_data, ['extendedProperties', 'shared', 'originalID'])
+    if event_is_a_copy == False:
+        # If ext_properties_id is None then it means that event is original event and target event does't exists.
+        # If event is a copy then it should have originalID in extended properties.
+        if ext_properties_id is None:
+            return event_id,  "This is original event. Maybe remove _ for target to create."
+        else:
+            return ext_properties_id, "This is original event. Maybe remove _ for target to update."
+    else:
+        # In extended properties is target event id.
+        # If it's a copy so You can only update it.
+        return ext_properties_id, "This is copy event. Returned ID is ok for target."
 
 
 @app.route('/notifications', methods=['POST'])
@@ -693,8 +810,19 @@ def notifications():
                         status = event.get('status')
                         response_status = get_event_response_status(
                             event, CALENDAR_ID)
+                        original_id = check_original_id(event_id, event, event_is_a_copy)
+                        if event_is_a_copy == True:
+                            target_event_id = original_id[0]
+                        else:
+                            target_event_id = get_id(original_id)
                         target_event = check_if_id_exists_in_target_calendar(
-                            event_id, target_service)
+                            target_event_id, target_service)
+                        if event_is_a_copy == False and target_event is None:
+                            # So you need to create new event I should not be checking it
+                            # target_event_id = event_id
+                          if event_is_a_copy == False and target_event is not None:
+                              # You shoul update it.
+                              target_event_id = get_id(event_id) # NEED TO CHECK get_it
                         event_data = EventData()
                         # Check if target event extended properties are the same as in main calendar.
                         # If empty in target, then copy them from main calendar.
@@ -740,14 +868,14 @@ def notifications():
                             if response_status == 'declined':
                                 print(f"Event was declined. Deleting event.")
                                 delete_event(TARGET_CALENDAR_ID,
-                                             event_id, target_service, target_event)
+                                             target_event_id, target_service, target_event)
                                 continue
                             # If event was cancelled then delete target event.
                             if status == 'cancelled':
                                 print(
                                     f"Event status: {status}. Deleting event.")
                                 delete_event(TARGET_CALENDAR_ID,
-                                             event_id, target_service, target_event)
+                                             target_event_id, target_service, target_event)
                                 continue
                             if response_status == 'accepted' and target_status == 'cancelled':
                                 print(
@@ -758,7 +886,7 @@ def notifications():
                                     event_data, time_now)
                                 update_event(target_service,
                                              event_data, target_event)
-                                extended_properties = create_extended_properties(
+                                extended_properties = create_extended_properties(original_id,
                                     time_now, event_is_a_copy)
                                 event_data = EventData()
                                 add_extended_properties(
@@ -774,7 +902,7 @@ def notifications():
                                     event_data, time_now)
                                 patch_event(target_service, event_data,
                                             target_event_id, TARGET_CALENDAR_ID)
-                                extended_properties = create_extended_properties(
+                                extended_properties = create_extended_properties(original_id,
                                     time_now, event_is_a_copy)
                                 event_data = EventData()
                                 add_extended_properties(
@@ -790,7 +918,7 @@ def notifications():
                                     event_data, time_now)
                                 patch_event(target_service, event_data,
                                             target_event_id, TARGET_CALENDAR_ID)
-                                extended_properties = create_extended_properties(
+                                extended_properties = create_extended_properties(original_id,
                                     time_now, event_is_a_copy)
                                 event_data = EventData()
                                 add_extended_properties(
@@ -804,7 +932,7 @@ def notifications():
                                     event_data, time_now)
                                 patch_event(target_service, event_data,
                                             target_event_id, TARGET_CALENDAR_ID)
-                                extended_properties = create_extended_properties(
+                                extended_properties = create_extended_properties(original_id,
                                     time_now, event_is_a_copy)
                                 event_data = EventData()
                                 add_extended_properties(
@@ -829,7 +957,7 @@ def notifications():
                         if target_event == None and status != 'cancelled' and response_status != 'declined':
                             get_event_details(
                                 event, event_data, target_event, change_id=True)
-                            extended_properties = create_extended_properties(
+                            extended_properties = create_extended_properties(original_id,
                                 time_now, event_is_a_copy)
                             add_extended_properties(
                                 extended_properties, event_data)
@@ -848,7 +976,7 @@ def notifications():
                                 event_data, time_now)
                             update_event(target_service,
                                          event_data, target_event)
-                            extended_properties = create_extended_properties(
+                            extended_properties = create_extended_properties(original_id,
                                 time_now, event_is_a_copy)
                             event_data = EventData()
                             add_extended_properties(
@@ -864,50 +992,13 @@ def notifications():
     return "OK", 200
 
 
+# --- Run the channel creation when the app starts ---
+# with app.app_context():
+#     create_token()
+#     create_notification_channel(
+#         CALENDAR_ID, WEBHOOK_URL, AUTH_TOKEN, CHANNEL_ID)
+
+
 # --- Run the Flask app ---
 if __name__ == '__main__':
-    # --- Load OAuth 2.0 Credentials ---
-    if os.path.exists(TOKEN_PATH):
-        CREDENTIALS = Credentials.from_authorized_user_file(
-            TOKEN_PATH, SCOPES)
-    # If there are no (valid) credentials available, let the user log in.
-    if not CREDENTIALS or not CREDENTIALS.valid:
-        if CREDENTIALS and CREDENTIALS.expired and CREDENTIALS.refresh_token:
-            CREDENTIALS.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CREDENTIALS_PATH, SCOPES
-            )
-            CREDENTIALS = flow.run_local_server(port=0)
-        # Save the credentials for the next run
-        with open(TOKEN_PATH, "w") as token:
-            token.write(CREDENTIALS.to_json())
-
-    if os.path.exists(TARGET_TOKEN_PATH):
-        TARGET_CREDENTIALS = Credentials.from_authorized_user_file(
-            TARGET_TOKEN_PATH, SCOPES)
-    # If there are no (valid) credentials available, let the user log in.
-    if not TARGET_CREDENTIALS or not TARGET_CREDENTIALS.valid:
-        if TARGET_CREDENTIALS and TARGET_CREDENTIALS.expired and TARGET_CREDENTIALS.refresh_token:
-            TARGET_CREDENTIALS.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CREDENTIALS_PATH, SCOPES
-            )
-            TARGET_CREDENTIALS = flow.run_local_server(port=0)
-        # Save the credentials for the next run
-        with open(TARGET_TOKEN_PATH, "w") as token:
-            token.write(TARGET_CREDENTIALS.to_json())
-
-    AUTH_TOKEN = CREDENTIALS.token
-    timezone = datetime.timezone(datetime.timedelta(
-        hours=0))  # Choose your serwer timezone
-    Last_update_timestamp = datetime.datetime(
-        2025, 4, 1, 8, 0, tzinfo=timezone)
-
-    # --- Run the channel creation when the app starts ---
-    with app.app_context():
-        create_notification_channel(
-            CALENDAR_ID, WEBHOOK_URL, AUTH_TOKEN, CHANNEL_ID)
-
     app.run()
