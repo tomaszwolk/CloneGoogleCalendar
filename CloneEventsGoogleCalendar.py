@@ -32,46 +32,18 @@ Change everywhere 'YOUR_DATA' to your data.
 
 app = Flask(__name__)
 
-# --- Configuration (Replace with your actual values) ---
-SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
-# Replace with your calendar ID in e-mail format (e.g., example@gmail.com).
-# Using 'primary' instead of an email address will cause issues when checking
-# the 'responseStatus' of attendees.
+# --- Configuration (Replace with your actual values in file config.ini) ---
+SCOPES = "YOUR_DATA"
 CALENDAR_ID = "YOUR_DATA"
-# Replace with your calendar ID, string
 TARGET_CALENDAR_ID = "YOUR_DATA"
-# Your Webhook server URL
 WEBHOOK_URL = "YOUR_DATA"
-# Channel Id must be unique each time serwer is started
 CHANNEL_ID = str(uuid.uuid4())
-
-""" 
---- Visbility ---
-"default" - for default value
-"private" - if copied event should be private
-"public" - event and event details is visible for all readers
-None - copy visibility from main calendar
-"""
 VISIBILITY = "YOUR_DATA"
-
-"""
---- Enable two-way change of events in calendar. ---
-True - event copies made in target can modifiy events in main calendar-default
-False - event copies made in target can't modifiy events in main calendar
-"""
 TWO_WAY_CHANGE = "YOUR_DATA"
-
-"""
-For PREFIXES first key in dictionary is default key for main calendar.
-Second key is default for target calendar.
-#olor ID:
-- 7 - PAW
-- 9 - JAGODA
-"""
 PREFIXES = {
     "[BTL]": "9",
     "[MKS]": "7",
-    "[ADSO]": "7",
+    "[ADSO]": "9",
 }
 
 
@@ -86,9 +58,9 @@ PREFIXES = {
 # TOKEN_PATH = os.getenv('TOKEN_PATH')
 # CREDENTIALS_PATH = os.getenv('CREDENTIALS_PATH')
 # """
-TOKEN_PATH = "YOUR_DATA"  # example /token.json
-TARGET_TOKEN_PATH = "YOUR_DATA"  # example /target_token.json
-CREDENTIALS_PATH = "YOUR_DATA"  # example /credentials.json
+TOKEN_PATH = "YOUR_DATA"
+TARGET_TOKEN_PATH = "YOUR_DATA"
+CREDENTIALS_PATH = "YOUR_DATA"
 CREDENTIALS = None
 TARGET_CREDENTIALS = None
 AUTH_TOKEN = None
@@ -349,7 +321,9 @@ def check_event_origin(data: dict, string: str) -> bool:
     ext_properties_note = get_nested_property(
         data, ['extendedProperties', 'shared', 'note'])
     string_to_compare = f"Event copied from {string}"
-    if string_to_compare == ext_properties_note:
+    if ext_properties_note == None:
+        return None
+    elif string_to_compare == ext_properties_note:
         return True
     else:
         return False
@@ -450,9 +424,14 @@ def get_event_details(event: dict, event_data: EventData, target_event: dict, ch
             # It ensures that this property stays the same in target calendar.
             # Check which event is a copy and which is original.
             # Works only after extended properties were added.
+            # If check_event_origin == None, then it's original because extended properties can't be overwritten
             event_is_a_copy = check_event_origin(event, TARGET_CALENDAR_ID)
+            if event_is_a_copy == None:
+                event_is_a_copy = False
             target_event_is_a_copy = check_event_origin(
                 target_event, CALENDAR_ID)
+            if target_event_is_a_copy == None:
+                target_event_is_a_copy = False
             print(
                 f"Event is a copy: {event_is_a_copy}. Target event is a copy: {target_event_is_a_copy}")
             # Check if prefix should be added.
@@ -512,7 +491,7 @@ def get_event_details(event: dict, event_data: EventData, target_event: dict, ch
         return None
 
 
-def create_extended_properties(event_id, time_now: datetime, event_is_a_copy=False) -> None:
+def create_extended_properties(event_id: str, time_now: datetime, event_is_a_copy: bool=False) -> None:
     if event_is_a_copy:
         calendar_id = TARGET_CALENDAR_ID
     else:
@@ -605,7 +584,7 @@ def create_new_event(calendar_id: str, event_data: EventData, service, time_now)
     print(f"Creating event data: {event_data.data}")
     try:
         event = service.events().insert(calendarId=calendar_id,
-                                        body=event_data.data, conferenceDataVersion=1, supportsAttachments=True).execute()
+                                        body=event_data.data, conferenceDataVersion=1, supportsAttachments=True, sendUpdates='none').execute()
         print(
             f"Event created: {event.get('htmlLink')}\n{event_data.data}\n")
     except Exception as e:
@@ -623,7 +602,7 @@ def update_event(target_service, event_data: EventData, target_event_id: str) ->
     """
     try:
         target_service.events().update(calendarId=TARGET_CALENDAR_ID,
-                                       eventId=target_event_id, body=event_data.data, conferenceDataVersion=1, supportsAttachments=True).execute()
+                                       eventId=target_event_id, body=event_data.data, conferenceDataVersion=1, supportsAttachments=True, sendUpdates='none').execute()
         print(
             f"Event: {event_data.data.get('summary', 'No summary')}, ID: {target_event_id} has been updated.")
     except Exception as e:
@@ -652,62 +631,12 @@ def patch_event(service, event_data: EventData, event_id, calendar_id) -> None:
         return
 
 
-def check_if_both_calendars_in_attendees(event: list) -> bool:
-    """
-    !!!!! CHENGED TO check_calendars_in_attendees function.!!!!!
-    Check if both calendars are in the event attendees.
-
-    Args:
-        event (list): list of event attendees."""
-    calendar_id_in_attendees = False
-    target_calendar_id_in_attendees = False
-    try:
-        attendees = event.get('attendees')
-        for attendee in attendees:
-            if attendee.get('email') == CALENDAR_ID:
-                calendar_id_in_attendees = True
-            if attendee.get('email') == TARGET_CALENDAR_ID:
-                target_calendar_id_in_attendees = True
-        if calendar_id_in_attendees and target_calendar_id_in_attendees:
-            return True
-        else:
-            return False
-    except Exception as e:
-        print(f"Error checking attendees {e}")
-        return False
-
-
-def check_if_event_sequence_is_smaller(event: dict, target_event: dict) -> bool:
-    """
-    !!!! DONT USE IT BECAUSE CHANGING RESPONSE STATUS DOESNT AFFECT SEQUENCE NUMBER.!!!!
-
-    Check if event sequence is smaller in main calendar.
-    If yes then skip it.
-
-    Args:
-        event (dict): The event data from Google Calendar.
-        target_event (dict): The event data from the target calendar.
-    """
-    try:
-        sequence = event.get('sequence')
-        target_sequence = target_event.get('sequence')
-        if sequence <= target_sequence:
-            print(
-                f"Target event sequence = {target_sequence} >= Event sequence = {sequence}. Skip.")
-            return True
-        else:
-            return False
-    except Exception as e:
-        print(f"Error checking sequence {e}")
-        return False
-
-
-def check_calendars_in_attendees(event: list) -> str:
+def check_calendars_in_attendees(event: dict) -> str:
     """
     Check if both calendars are in the event attendees.
 
     Args:
-        event (list): list of event attendees.
+        event (dict): list of event attendees.
 
     Returns:
         - "Both"
@@ -744,7 +673,7 @@ def check_calendars_in_attendees(event: list) -> str:
 def check_original_id(event_id: str, event_data: dict, event_is_a_copy: bool) -> str:
     ext_properties_id = get_nested_property(
         event_data, ['extendedProperties', 'shared', 'originalID'])
-    if event_is_a_copy == False:
+    if event_is_a_copy == False or event_is_a_copy == None:
         # If ext_properties_id is None then it means that event is original event and target event does't exists.
         # If event is a copy then it should have originalID in extended properties.
         if ext_properties_id is None:
@@ -758,6 +687,14 @@ def check_original_id(event_id: str, event_data: dict, event_is_a_copy: bool) ->
         # If it's a copy so You can only update it.
         # "This is copy event. Returned ID is ok for target."
         return ext_properties_id
+
+
+def event_created(event: dict, email) -> bool:
+    creator = event.get('creator', {}).get('email', {})
+    if creator == email:
+        return True
+    else:
+        return False
 
 
 @app.route('/notifications', methods=['POST'])
@@ -799,6 +736,8 @@ def notifications():
                         # If two way change is disabled and event is a copy then skip it.
                         event_is_a_copy = check_event_origin(
                             event, TARGET_CALENDAR_ID)
+                        # if event_is_a_copy == None:
+                        #     event_is_a_copy = False
                         if TWO_WAY_CHANGE == False and event_is_a_copy == True:
                             print("Event copied from main calendar. Skip.")
                             continue
@@ -819,6 +758,12 @@ def notifications():
                             target_event_id = get_id(original_id)
                         target_event = check_if_id_exists_in_target_calendar(
                             target_event_id, target_service)
+                        event_created_by_calendar_id = event_created(event, CALENDAR_ID)
+                        print(f"Event created by calendar id: {event_created_by_calendar_id}.")
+                        if target_event:
+                            target_event_created_by_target_calendar_id = event_created(target_event, TARGET_CALENDAR_ID)
+                        else:
+                            target_event_created_by_target_calendar_id = False
                         if event_is_a_copy == False and target_event is None:
                             # So you need to create new event I should not be checking it
                             # target_event_id = event_id
@@ -882,70 +827,78 @@ def notifications():
                             if response_status == 'accepted' and target_status == 'cancelled':
                                 print(
                                     f"Event response status: {response_status} and target event status: {target_status}. Updating event.")
-                                get_event_details(
-                                    event, event_data, target_event)
-                                update_extended_properties_timestamp(
-                                    event_data, time_now)
-                                update_event(target_service,
-                                             event_data, target_event_id)
-                                extended_properties = create_extended_properties(original_id,
-                                    time_now, event_is_a_copy)
-                                event_data = EventData()
-                                add_extended_properties(
-                                    extended_properties, event_data)
-                                patch_event(service, event_data,
-                                            event_id, CALENDAR_ID)
+                                extended_properties = create_extended_properties(original_id, time_now, event_is_a_copy)
+                                if event_created_by_calendar_id:
+                                    event_data_patched = EventData()
+                                    add_extended_properties(
+                                        extended_properties, event_data_patched)
+                                    patch_event(service, event_data_patched,
+                                                event_id, CALENDAR_ID)
+                                if target_event_created_by_target_calendar_id:
+                                    get_event_details(
+                                        event, event_data, target_event)
+                                    update_extended_properties_timestamp(
+                                        event_data, time_now)
+                                    update_event(target_service,
+                                                event_data, target_event_id)
                                 continue
                             if response_status == 'accepted' and target_status != 'confirmed':
                                 print(
                                     f"Event response status: {response_status} and target event status: {target_status}. Patching event.")
-                                event_data.data.update({"status": "confirmed"})
-                                update_extended_properties_timestamp(
-                                    event_data, time_now)
-                                patch_event(target_service, event_data,
-                                            target_event_id, TARGET_CALENDAR_ID)
-                                extended_properties = create_extended_properties(original_id,
-                                    time_now, event_is_a_copy)
-                                event_data = EventData()
-                                add_extended_properties(
-                                    extended_properties, event_data)
-                                patch_event(service, event_data,
-                                            event_id, CALENDAR_ID)
+                                extended_properties = create_extended_properties(original_id, time_now, event_is_a_copy)
+                                if event_created_by_calendar_id:
+                                    event_data_patched = EventData()
+                                    add_extended_properties(
+                                        extended_properties, event_data_patched)
+                                    patch_event(service, event_data_patched,
+                                                event_id, CALENDAR_ID)
+                                if target_event_created_by_target_calendar_id:
+                                    event_data.data.update({"status": "confirmed"})
+                                    update_extended_properties_timestamp(
+                                        event_data, time_now)
+                                    patch_event(target_service, event_data,
+                                                target_event_id, TARGET_CALENDAR_ID)
                                 continue
                             if response_status == 'tentative' and target_status != 'tentative':
                                 print(
                                     f"Event response status: {response_status} and target event status: {target_status}. Patching event.")
-                                event_data.data.update({"status": "tentative"})
-                                update_extended_properties_timestamp(
-                                    event_data, time_now)
-                                patch_event(target_service, event_data,
-                                            target_event_id, TARGET_CALENDAR_ID)
-                                extended_properties = create_extended_properties(original_id,
-                                    time_now, event_is_a_copy)
-                                event_data = EventData()
-                                add_extended_properties(
-                                    extended_properties, event_data)
-                                patch_event(service, event_data,
-                                            event_id, CALENDAR_ID)
+                                extended_properties = create_extended_properties(original_id, time_now, event_is_a_copy)
+                                if event_created_by_calendar_id:
+                                    event_data_patched = EventData()
+                                    add_extended_properties(
+                                        extended_properties, event_data_patched)
+                                    patch_event(service, event_data_patched,
+                                                event_id, CALENDAR_ID)
+                                if target_event_created_by_target_calendar_id:
+                                    event_data.data.update({"status": "tentative"})
+                                    update_extended_properties_timestamp(
+                                        event_data, time_now)
+                                    patch_event(target_service, event_data,
+                                                target_event_id, TARGET_CALENDAR_ID)
                                 continue
                             if target_status != status:
-                                event_data.data.update({"status": status})
-                                update_extended_properties_timestamp(
-                                    event_data, time_now)
-                                patch_event(target_service, event_data,
-                                            target_event_id, TARGET_CALENDAR_ID)
-                                extended_properties = create_extended_properties(original_id,
-                                    time_now, event_is_a_copy)
-                                event_data = EventData()
-                                add_extended_properties(
-                                    extended_properties, event_data)
-                                patch_event(service, event_data,
-                                            event_id, CALENDAR_ID)
+                                print(f"Target_status: {target_status}. Event status: {status}.")
+                                extended_properties = create_extended_properties(original_id,time_now, event_is_a_copy)
+                                if event_created_by_calendar_id:    
+                                    event_data_patched = EventData()
+                                    add_extended_properties(
+                                        extended_properties, event_data_patched)
+                                    patch_event(service, event_data_patched,
+                                                event_id, CALENDAR_ID)
+                                if target_event_created_by_target_calendar_id:
+                                    event_data.data.update({"status": status})
+                                    update_extended_properties_timestamp(
+                                        event_data, time_now)
+                                    patch_event(target_service, event_data,
+                                                target_event_id, TARGET_CALENDAR_ID)
                                 continue
                         # If event was cancelled then delete target event.
                         # First check if in target event is attendee with email = TARGET_CALENDAR_ID and not CALENDAR_ID.
-                        target_check_attendees = check_calendars_in_attendees(
-                            target_event)
+                        target_check_attendees = None
+                        if target_event:
+                            target_check_attendees = check_calendars_in_attendees(
+                                target_event)
+                            print(f"Target attendees: {target_check_attendees}")
                         if status == 'cancelled' and target_check_attendees == "Target":
                             print(
                                 f"Event status: {status}. Attendee = Target. Skip")
@@ -957,34 +910,34 @@ def notifications():
                                          event_id, target_service, target_event)
                             continue
                         if target_event == None and status != 'cancelled' and response_status != 'declined':
-                            get_event_details(
-                                event, event_data, target_event, change_id=True)
-                            extended_properties = create_extended_properties(original_id,
-                                time_now, event_is_a_copy)
-                            add_extended_properties(
-                                extended_properties, event_data)
-                            create_new_event(
-                                TARGET_CALENDAR_ID, event_data, target_service, time_now)
-                            event_data = EventData()
-                            add_extended_properties(
-                                extended_properties, event_data)
-                            patch_event(service, event_data,
-                                        event_id, CALENDAR_ID)
+                            print(f"Target event: {target_event}. Creating new event.")
+                            extended_properties = create_extended_properties(original_id, time_now, event_is_a_copy)
+                            if event_created_by_calendar_id:   
+                                event_data_patched = EventData()
+                                add_extended_properties(
+                                    extended_properties, event_data_patched)
+                                patch_event(service, event_data_patched,
+                                            event_id, CALENDAR_ID)
+                            get_event_details(event, event_data, target_event, change_id=True)
+                            add_extended_properties(extended_properties, event_data)
+                            create_new_event(TARGET_CALENDAR_ID, event_data, target_service, time_now)
                             continue
                         else:
-                            get_event_details(
-                                event, event_data, target_event)
-                            update_extended_properties_timestamp(
-                                event_data, time_now)
-                            update_event(target_service,
-                                         event_data, target_event_id)
-                            extended_properties = create_extended_properties(original_id,
-                                time_now, event_is_a_copy)
-                            event_data = EventData()
-                            add_extended_properties(
-                                extended_properties, event_data)
-                            patch_event(service, event_data,
-                                        event_id, CALENDAR_ID)
+                            print(f"Last check. Updating event.")
+                            extended_properties = create_extended_properties(original_id, time_now, event_is_a_copy)
+                            if event_created_by_calendar_id:
+                                event_data_patched = EventData()
+                                add_extended_properties(
+                                    extended_properties, event_data_patched)
+                                patch_event(service, event_data_patched,
+                                            event_id, CALENDAR_ID)
+                            if target_event_created_by_target_calendar_id:
+                                get_event_details(
+                                    event, event_data, target_event)
+                                update_extended_properties_timestamp(
+                                    event_data, time_now)
+                                update_event(target_service,
+                                            event_data, target_event_id)
                             continue
                 page_token = events_result.get('nextPageToken')
                 if not page_token:
