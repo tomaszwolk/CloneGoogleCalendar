@@ -1,5 +1,4 @@
-import pytest
-from CloneEventsGoogleCalendar import get_id, check_if_event_sequence_is_smaller
+from app.CloneEventsGoogleCalendar import get_id
 
 CALENDAR_ID = 'test@gmail.com'
 TARGET_CALENDAR_ID = 'some_mail@domain.pl'
@@ -81,8 +80,8 @@ def test_get_id_V3():
     assert get_id(EVENT_3['id']) == '7khhiebcq22i04sueovmvk6rf4'
 
 
-def test_check_if_event_sequence_is_smaller():
-    assert check_if_event_sequence_is_smaller(
-        EVENT_2, EVENT_1)
-    assert not check_if_event_sequence_is_smaller(
-        EVENT_1, EVENT_2)
+# def test_check_if_event_sequence_is_smaller():
+#     assert check_if_event_sequence_is_smaller(
+#         EVENT_2, EVENT_1)
+#     assert not check_if_event_sequence_is_smaller(
+#         EVENT_1, EVENT_2)

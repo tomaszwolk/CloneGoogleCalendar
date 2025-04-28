@@ -1,4 +1,4 @@
-from CloneEventsGoogleCalendar import event_created
+from app.CloneEventsGoogleCalendar import event_created
 import pytest
 
 @pytest.mark.parametrize(
@@ -6,6 +6,7 @@ import pytest
     (
         ({'creator': {'email': 'test@gmail.com'}}, "test@gmail.com", True),
         ({'creator': {'email': 'test2@gmail.com'}}, "test@gmail.com", False),
+        ({}, "test@gmail.com", False),
 )
     )
 def test_event_created(event, email, expected):

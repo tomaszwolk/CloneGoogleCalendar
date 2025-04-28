@@ -173,7 +173,7 @@ def validate_post_request(time_now) -> str:
         return 405
 
 
-def time_now_minus_seconds(time_now, seconds=10):
+def time_now_minus_seconds(time_now: datetime, seconds: int=10) -> datetime:
     """
     Checks actual time and subtract from it 10 seconds.
     It's used for getting list of events.
@@ -182,7 +182,7 @@ def time_now_minus_seconds(time_now, seconds=10):
     return now_minus_x_seconds
 
 
-def time_now_minus_seconds_iso(time_now, seconds=10) -> str:
+def time_now_minus_seconds_iso(time_now: datetime, seconds: int=10) -> str:
     return time_now_minus_seconds(time_now, seconds).isoformat()
 
 
@@ -208,34 +208,11 @@ def get_event_response_status(event: dict, email) -> str:
                 if attendee['email'] == email:
                     return attendee.get('responseStatus')
                 else:
-                    return None
+                    continue
         return response_status
     except Exception as e:
         print(f"Exception getting response status: {e}")
         return None
-
-
-def get_response_status(attendees: list, email: str = CALENDAR_ID) -> str:
-    """Check if the invitation was accepted.
-
-    Args:
-        attendees (list): List of event attendees.
-        email (str): Email of the main user.
-
-    Possible options:
-        - 'needsAction' - invitation not accepted (default) ->
-            create a new event
-        - 'declined' - invitation declined ->
-            delete the event (it was created when the invitation was received)
-        - 'tentative' - the invitation is being considered ->
-            do nothing (event already created)
-        - 'accepted' - invitation accepted ->
-            do nothing (event already created)
-    """
-    for attendee in attendees:
-        if attendee['email'] == email:
-            return attendee.get('responseStatus')
-    return None
 
 
 def delete_event(calendar_id: str, event_id: str, target_service, target_event) -> None:
@@ -532,23 +509,6 @@ def check_timestamp(event: dict, time_now: datetime):
     except Exception as e:
         print(f"Error checking timestamp: {e}")
         return False
-
-
-def copy_extended_properties_note(event_data: EventData, event: dict) -> None:
-    """
-    DEPRECATED - DO NOT USE IT.
-    Copies extended properties from the target event to the event data.
-
-    Args:
-        event_data (EventData): An instance of EventData containing the event details.
-        target_event (dict): The event data from the target calendar."""
-    try:
-        extended_properties_note = event.get(
-            'extendedProperties', {}).get('shared', {}).get('note')
-        event_data.data['extendedProperties']['shared'].update(
-            {'note': extended_properties_note})
-    except Exception:
-        return None
 
 
 def update_extended_properties_timestamp(event_data: EventData, time_now: datetime) -> None:

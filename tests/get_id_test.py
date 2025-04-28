@@ -1,5 +1,5 @@
 import pytest
-from CloneEventsGoogleCalendar import get_id
+from app.CloneEventsGoogleCalendar import get_id
 
 @pytest.mark.parametrize(
     "id, expected",

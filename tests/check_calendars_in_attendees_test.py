@@ -1,5 +1,6 @@
-from CloneEventsGoogleCalendar import check_calendars_in_attendees
+from app.CloneEventsGoogleCalendar import check_calendars_in_attendees
 import pytest
+from pytest import MonkeyPatch
 
 # test_CloneEventsGoogleCalendar.py
 # Mock constants
@@ -27,13 +28,8 @@ TARGET_CALENDAR_ID = "target@gmail.com"
 )
 def test_check_calendars_in_attendees(monkeypatch, event, expected):
     # Mock constants in module
-    monkeypatch.setattr("CloneEventsGoogleCalendar.CALENDAR_ID", CALENDAR_ID)
+    monkeypatch.setattr("app.CloneEventsGoogleCalendar.CALENDAR_ID", CALENDAR_ID)
     monkeypatch.setattr(
-        "CloneEventsGoogleCalendar.TARGET_CALENDAR_ID", TARGET_CALENDAR_ID)
-
-    # Mock problematic functions
-    monkeypatch.setattr("CloneEventsGoogleCalendar.create_token", lambda: None)
-    monkeypatch.setattr(
-        "CloneEventsGoogleCalendar.create_notification_channel", lambda: None)
+        "app.CloneEventsGoogleCalendar.TARGET_CALENDAR_ID", TARGET_CALENDAR_ID)
 
     assert check_calendars_in_attendees(event) == expected
