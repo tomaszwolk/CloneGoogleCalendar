@@ -1,6 +1,6 @@
 configs/
-test.py
-test2.py
+tests/.test1.py
+tests/.test2.py
 BTM*
 MTB*
 do_testow/

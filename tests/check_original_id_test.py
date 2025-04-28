@@ -1,21 +1,5 @@
 from app.CloneEventsGoogleCalendar import check_original_id
 import pytest
-
-class EventData:
-    def __init__(self):
-        self.data = {}
-
-class EventData2:
-    def __init__(self):
-        self.data = {
-                    'extendedProperties': {'shared': {'originalID': 'oihj89vsdfd0saf'}}
-                    }
-        
-class EventData3:
-    def __init__(self):
-        self.data = {
-                    'extendedProperties': {'shared': {'originalID': '_oihj89vsdfd0_saf'}}
-                    }
         
 @pytest.mark.parametrize(
         ("event_id, event_data, event_is_a_copy, expected"),
