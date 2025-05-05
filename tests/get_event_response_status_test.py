@@ -30,3 +30,7 @@ def test_get_event_response_status(event, email, expected):
     assert get_event_response_status(event, email) == expected
 
 
+# def test_get_event_response_status_exception():
+#     with pytest.raises(AttributeError) as excinfo:
+#         get_event_response_status([], 1)
+#     assert str(excinfo.value) == (f"AttributeError getting response status: 'list' object has no attribute 'get'")

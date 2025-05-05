@@ -8,6 +8,8 @@ do_testow/
 email.txt
 test_config.py
 acl.py
+*_private.py
+*.docx
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

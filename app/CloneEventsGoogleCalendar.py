@@ -186,7 +186,7 @@ def time_now_minus_seconds_iso(time_now: datetime, seconds: int=10) -> str:
     return time_now_minus_seconds(time_now, seconds).isoformat()
 
 
-def get_event_response_status(event: dict, email) -> str:
+def get_event_response_status(event: dict, email: str) -> str:
     """
     Get invitation response status if there are attendees.
 
@@ -210,6 +210,10 @@ def get_event_response_status(event: dict, email) -> str:
                 else:
                     continue
         return response_status
+    except AttributeError as e:
+        # raise AttributeError(f"AttributeError getting response status: {e}")
+        print(f"AttributeError getting response status: {e}")
+        return None
     except Exception as e:
         print(f"Exception getting response status: {e}")
         return None
