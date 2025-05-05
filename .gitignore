@@ -1,9 +1,15 @@
-test.py
+configs/
+tests/.test1.py
+tests/.test2.py
 BTM*
 MTB*
 do_testow/
 *.json
 email.txt
+test_config.py
+acl.py
+app/CloneEvents_private.py
+*.docx
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
