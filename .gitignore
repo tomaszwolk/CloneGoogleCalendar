@@ -8,7 +8,7 @@ do_testow/
 email.txt
 test_config.py
 acl.py
-*_private.py
+app/CloneEvents_private.py
 *.docx
 
 # Byte-compiled / optimized / DLL files
