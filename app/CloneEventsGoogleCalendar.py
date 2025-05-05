@@ -659,6 +659,18 @@ def event_created(event: dict, email) -> bool:
         return True
     else:
         return False
+    
+
+def check_recurrence(event: dict) -> bool:
+    try:
+        recurrence = event.get('recurrence')
+        recurrence_id = event.get('recurringEventId')
+        if recurrence or recurrence_id:
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"Check recurrence exception: {e}")
 
 
 @app.route('/notifications', methods=['POST'])
@@ -697,6 +709,8 @@ def notifications():
                     for event in events:
                         # For debugging print whole event.
                         print(f"Checking event: {event}")
+                        # Check if event if recurrence
+                        recurrence = check_recurrence(event)
                         # If two way change is disabled and event is a copy then skip it.
                         event_is_a_copy = check_event_origin(
                             event, TARGET_CALENDAR_ID)
@@ -716,24 +730,20 @@ def notifications():
                         response_status = get_event_response_status(
                             event, CALENDAR_ID)
                         original_id = check_original_id(event_id, event, event_is_a_copy)
-                        if event_is_a_copy == True:
+                        if recurrence:
+                            target_event_id = event_id
+                        elif event_is_a_copy == True:
                             target_event_id = original_id
                         else:
                             target_event_id = get_id(original_id)
                         target_event = check_if_id_exists_in_target_calendar(
                             target_event_id, target_service)
-                        event_created_by_calendar_id = event_created(event, CALENDAR_ID)
-                        print(f"Event created by calendar id: {event_created_by_calendar_id}.")
+                        event_created_by_main_calendar_id = event_created(event, CALENDAR_ID)
+                        print(f"Event created by main calendar id: {event_created_by_main_calendar_id}.")
                         if target_event:
                             target_event_created_by_target_calendar_id = event_created(target_event, TARGET_CALENDAR_ID)
                         else:
                             target_event_created_by_target_calendar_id = False
-                        if event_is_a_copy == False and target_event is None:
-                            # So you need to create new event I should not be checking it
-                            # target_event_id = event_id
-                          if event_is_a_copy == False and target_event is not None:
-                              # You should update it.
-                              target_event_id = get_id(event_id)
                         event_data = EventData()
                         # Check if target event extended properties are the same as in main calendar.
                         # If empty in target, then copy them from main calendar.
@@ -746,11 +756,6 @@ def notifications():
                                 'shared', {}).get('timestamp', None)
                             print(
                                 f"Target timestamp: {target_event_timestamp}. Event timestamp: {event_timestamp}.")
-                            # I left it for further development. Code:
-                            # if target_event_timestamp > event_timestamp:
-                            #     print(
-                            #         f"Target timestamp: {target_event_timestamp} is newer than event timestamp: {event_timestamp}. Skip.")
-                            #     continue
                             if check_timestamp(event, time_now) == False:
                                 print(
                                     f"Timestamp is not older than 10 seconds. Skip.")
@@ -792,7 +797,7 @@ def notifications():
                                 print(
                                     f"Event response status: {response_status} and target event status: {target_status}. Updating event.")
                                 extended_properties = create_extended_properties(original_id, time_now, event_is_a_copy)
-                                if event_created_by_calendar_id:
+                                if event_created_by_main_calendar_id:
                                     event_data_patched = EventData()
                                     add_extended_properties(
                                         extended_properties, event_data_patched)
@@ -810,7 +815,7 @@ def notifications():
                                 print(
                                     f"Event response status: {response_status} and target event status: {target_status}. Patching event.")
                                 extended_properties = create_extended_properties(original_id, time_now, event_is_a_copy)
-                                if event_created_by_calendar_id:
+                                if event_created_by_main_calendar_id:
                                     event_data_patched = EventData()
                                     add_extended_properties(
                                         extended_properties, event_data_patched)
@@ -827,7 +832,7 @@ def notifications():
                                 print(
                                     f"Event response status: {response_status} and target event status: {target_status}. Patching event.")
                                 extended_properties = create_extended_properties(original_id, time_now, event_is_a_copy)
-                                if event_created_by_calendar_id:
+                                if event_created_by_main_calendar_id:
                                     event_data_patched = EventData()
                                     add_extended_properties(
                                         extended_properties, event_data_patched)
@@ -843,7 +848,7 @@ def notifications():
                             if target_status != status:
                                 print(f"Target_status: {target_status}. Event status: {status}.")
                                 extended_properties = create_extended_properties(original_id,time_now, event_is_a_copy)
-                                if event_created_by_calendar_id:    
+                                if event_created_by_main_calendar_id:    
                                     event_data_patched = EventData()
                                     add_extended_properties(
                                         extended_properties, event_data_patched)
@@ -876,7 +881,7 @@ def notifications():
                         if target_event == None and status != 'cancelled' and response_status != 'declined':
                             print(f"Target event: {target_event}. Creating new event.")
                             extended_properties = create_extended_properties(original_id, time_now, event_is_a_copy)
-                            if event_created_by_calendar_id:   
+                            if event_created_by_main_calendar_id:   
                                 event_data_patched = EventData()
                                 add_extended_properties(
                                     extended_properties, event_data_patched)
@@ -889,7 +894,7 @@ def notifications():
                         else:
                             print(f"Last check. Updating event.")
                             extended_properties = create_extended_properties(original_id, time_now, event_is_a_copy)
-                            if event_created_by_calendar_id:
+                            if event_created_by_main_calendar_id:
                                 event_data_patched = EventData()
                                 add_extended_properties(
                                     extended_properties, event_data_patched)
