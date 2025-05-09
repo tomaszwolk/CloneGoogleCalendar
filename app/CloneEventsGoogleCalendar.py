@@ -156,24 +156,27 @@ def create_notification_channel(calendar_id: str,
         return response.json()
 
 
-def validate_post_request(time_now) -> str:
+def validate_post_request(time_now) -> int | str:
     """
     Allow only POST method.
     """
     global Last_update_timestamp
     time_now_minus_x_seconds = time_now - datetime.timedelta(seconds=1)
     if Last_update_timestamp > time_now_minus_x_seconds:
-        return 208
+        return 208 # Already Reported
     if request.method == 'POST':
         # print(f"Full headers: {request.headers}")  # Keep for debugging
         resource_state = request.headers.get('X-Goog-Resource-State')
+        if resource_state == None:
+            print("No resource state in headers.")
+            return 400 # Bad Request
         Last_update_timestamp = time_now
         return resource_state
     else:
-        return 405
+        return 405 # Method Not Allowed
 
 
-def time_now_minus_seconds(time_now: datetime, seconds: int=10) -> datetime:
+def time_now_minus_seconds(time_now: datetime.datetime, seconds: int=10) -> datetime.datetime:
     """
     Checks actual time and subtract from it 10 seconds.
     It's used for getting list of events.
@@ -182,11 +185,11 @@ def time_now_minus_seconds(time_now: datetime, seconds: int=10) -> datetime:
     return now_minus_x_seconds
 
 
-def time_now_minus_seconds_iso(time_now: datetime, seconds: int=10) -> str:
+def time_now_minus_seconds_iso(time_now: datetime.datetime, seconds: int=10) -> str:
     return time_now_minus_seconds(time_now, seconds).isoformat()
 
 
-def get_event_response_status(event: dict, email: str) -> str:
+def get_event_response_status(event: dict, email: str) -> str | None:
     """
     Get invitation response status if there are attendees.
 
@@ -293,7 +296,7 @@ def get_nested_property(data, keys, default=None):
     return data
 
 
-def check_event_origin(data: dict, string: str) -> bool:
+def check_event_origin(data: dict, string: str) -> bool | None:
     """
     Check if the event is created by the user or is a guest event.
     If returns None that means event is original event or key is just missing.
@@ -310,7 +313,7 @@ def check_event_origin(data: dict, string: str) -> bool:
         return False
 
 
-def event_prefix(summary: str) -> str:
+def event_prefix(summary: str) -> str | None:
     """
     Get prefix from summary and check if it's in the PREFIXES dictionary.
     Returns None if prefix is not in the dictionary.
@@ -323,6 +326,7 @@ def event_prefix(summary: str) -> str:
     for key in PREFIXES:
         if summary_prefix == key:
             return key
+    return None
 
 
 def get_id(id: str) -> str:
@@ -383,10 +387,10 @@ def get_event_details(event: dict, event_data: EventData, target_event: dict, ch
         event_data.data = event
 
         if change_id:
-            id = get_id(event.get('id'))
+            id = get_id(event.get('id', ''))
             event_data.data.update({"id": id})
 
-        summary = event.get('summary')
+        summary = event.get('summary', '')
         summary_prefix = event_prefix(summary)
 
         # Check if event exist in target calendar.
@@ -416,7 +420,7 @@ def get_event_details(event: dict, event_data: EventData, target_event: dict, ch
             print(
                 f"Event is a copy: {event_is_a_copy}. Target event is a copy: {target_event_is_a_copy}")
             # Check if prefix should be added.
-            target_event_summary = target_event.get('summary')
+            target_event_summary = target_event.get('summary', '')
             target_summary_prefix = event_prefix(target_event_summary)
             # Means that in main calendar is original with prefix (PREFIXES[0])
             if summary_prefix == list(PREFIXES)[0] and target_summary_prefix == list(PREFIXES)[0]:
@@ -434,18 +438,18 @@ def get_event_details(event: dict, event_data: EventData, target_event: dict, ch
                 color_id = "0"
             # Means that prefix is not in the summary (original event in main calendar)
             elif summary_prefix == None and target_summary_prefix == list(PREFIXES)[0]:
-                summary = first_key + " " + summary
+                summary = first_key + " " + (summary if summary is not None else "")
                 color_id = PREFIXES[first_key]
             elif summary_prefix == target_summary_prefix:
                 summary = summary
-                color_id = event.get('colorId')
+                color_id = event.get('colorId', '')
             else:
                 # Something else, so copy as it is
                 summary = summary
                 color_id = "0"
         else:  # Means that event doesn't exist in target calendar.
             if summary_prefix not in list(PREFIXES.keys()):
-                summary = first_key + " " + summary
+                summary = first_key + " " + (summary if summary is not None else "")
                 color_id = PREFIXES[first_key]
             else:
                 for key, value in PREFIXES.items():
@@ -472,7 +476,7 @@ def get_event_details(event: dict, event_data: EventData, target_event: dict, ch
         return None
 
 
-def create_extended_properties(event_id: str, time_now: datetime, event_is_a_copy: bool=False) -> None:
+def create_extended_properties(event_id: str, time_now: datetime.datetime, event_is_a_copy: bool=False) -> dict:
     if event_is_a_copy:
         calendar_id = TARGET_CALENDAR_ID
     else:
@@ -492,7 +496,7 @@ def add_extended_properties(extended_properties: dict, event_data: EventData) ->
         {"extendedProperties": extended_properties})
 
 
-def check_timestamp(event: dict, time_now: datetime):
+def check_timestamp(event: dict, time_now: datetime.datetime):
     """
     Check if timestamp is smaller than now minus 10 seconds.
     If yes then return True -> update event.
@@ -515,7 +519,7 @@ def check_timestamp(event: dict, time_now: datetime):
         return False
 
 
-def update_extended_properties_timestamp(event_data: EventData, time_now: datetime) -> None:
+def update_extended_properties_timestamp(event_data: EventData, time_now: datetime.datetime) -> None:
     """
     Updates the timestamp in the extended properties of the event data.
 
@@ -595,7 +599,7 @@ def patch_event(service, event_data: EventData, event_id, calendar_id) -> None:
         return
 
 
-def check_calendars_in_attendees(event: dict) -> str:
+def check_calendars_in_attendees(event: dict) -> str | None:
     """
     Check if both calendars are in the event attendees.
 
@@ -671,6 +675,7 @@ def check_recurrence(event: dict) -> bool:
             return False
     except Exception as e:
         print(f"Check recurrence exception: {e}")
+        return False
 
 
 @app.route('/notifications', methods=['POST'])

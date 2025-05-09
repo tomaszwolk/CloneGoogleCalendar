@@ -10,6 +10,7 @@ test_config.py
 acl.py
 app/CloneEvents_private.py
 *.docx
+Consent/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
